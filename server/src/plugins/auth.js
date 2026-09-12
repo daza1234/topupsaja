@@ -37,8 +37,10 @@ export default fp(async (app) => {
 
   // ── Session JWT (dashboard) ──
   app.decorate('authenticateSession', async (request, reply) => {
+    const token = getSessionToken(request)
+    if (!token) return reply.code(401).send({ error: 'Unauthorized' })
     try {
-      await request.jwtVerify(getSessionToken(request))
+      request.user = app.jwt.verify(token)
     } catch {
       return reply.code(401).send({ error: 'Unauthorized' })
     }
