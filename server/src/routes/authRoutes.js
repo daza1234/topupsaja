@@ -32,10 +32,15 @@ export default async function authRoutes(app) {
   app.post('/api/auth/register', {
     config: { rateLimit: { max: 10, timeWindow: '1 hour' } },
   }, async (request, reply) => {
-    const { email, password } = request.body ?? {}
+    const { email, password, consent } = request.body ?? {}
     if (!email || !password || password.length < 8) {
       return reply.code(400).send({
         error: 'Email wajib diisi & password minimal 8 karakter',
+      })
+    }
+    if (consent !== true) {
+      return reply.code(400).send({
+        error: 'Anda harus menyetujui Syarat & Ketentuan dan Kebijakan Privasi',
       })
     }
     const emailNorm = String(email).trim().toLowerCase()
@@ -52,7 +57,8 @@ export default async function authRoutes(app) {
     const role = config.adminEmails.includes(emailNorm) ? 'admin' : 'user'
 
     const user = await queryOne(
-      `insert into users (email, password_hash, role) values ($1, $2, $3)
+      `insert into users (email, password_hash, role, consent_accepted_at)
+       values ($1, $2, $3, now())
        returning id, email, role, balance_credits`,
       [emailNorm, hash, role]
     )
@@ -162,7 +168,8 @@ export default async function authRoutes(app) {
       const hash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10)
       const role = config.adminEmails.includes(emailNorm) ? 'admin' : 'user'
       const created = await queryOne(
-        `insert into users (email, password_hash, role) values ($1, $2, $3)
+        `insert into users (email, password_hash, role, consent_accepted_at)
+         values ($1, $2, $3, now())
          returning id, email, role, balance_credits`,
         [emailNorm, hash, role]
       )
