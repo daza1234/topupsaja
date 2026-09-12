@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import pc from 'picocolors'
 import { saveConfig, loadConfig, PermissionMode } from '../config.js'
 import { classifyBash } from './shell-safety.js'
+import { touchesSecretTool } from './secrets.js'
 import { decideRule, savePatternRule, derivePatternFromCommand, type PermissionRule } from './rules.js'
 
 /** Tool yang butuh approval (tergantung permission mode). */
@@ -143,9 +144,11 @@ export class PermissionManager {
    * Keputusan lengkap atas satu tool call (urutan):
    * (1) mode read-only → deny tool tulis/eksekusi (tidak bisa diluberkan rule);
    * (2) bash → classifyBash deny → deny absolut;
-   * (3) rule granular → allow/ask/deny (ask berlaku bahkan di yolo);
-   * (4) allowlist per-tool → allow;
-   * (5) logika mode lama (needsAsk). bash safe → allow otomatis di semua mode.
+   * (3) rule granular deny → deny absolut;
+   * (4) secret path (.env, ~/.topupsaja, ~/.tsa) → ask wajib (bahkan yolo);
+   * (5) rule granular lain → allow/ask (ask berlaku bahkan di yolo);
+   * (6) allowlist per-tool → allow;
+   * (7) logika mode lama (needsAsk). bash safe → allow otomatis di semua mode.
    */
   decide(tool: string, args: Record<string, unknown>, ctx: DecideContext): PermissionDecision {
     const cls = tool.startsWith('mcp__') ? 'bash' : tool
@@ -153,6 +156,8 @@ export class PermissionManager {
     if (ctx.readOnlyMode && NEED_APPROVAL.has(tool)) return 'deny'
     if (tool === 'bash' && classifyBash(String(args.command ?? '')) === 'deny') return 'deny'
     const ruleAction = decideRule(this.rules, tool, args, this.cwd)
+    if (ruleAction === 'deny') return 'deny'
+    if (touchesSecretTool(tool, args)) return 'ask'
     if (ruleAction) return ruleAction
     if (this.allowlist.has(tool)) return 'allow'
     if (this.mode === 'yolo') return 'allow'

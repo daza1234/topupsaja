@@ -103,11 +103,23 @@ export default async function topupRoutes(app) {
     }
 
     const topup = await queryOne(
-      'select id, credits, user_id from topups where provider_ref = $1 and status = $2',
+      'select id, credits, user_id, price_idr from topups where provider_ref = $1 and status = $2',
       [event.provider_ref, 'pending']
     )
     if (!topup) {
       return reply.code(200).send({ ok: true, ignored: 'already processed or not found' })
+    }
+
+    // Jangan pernah kredit bila nominal callback ≠ nominal order (tampering/bug vendor).
+    if (event.amount !== undefined) {
+      const expected = Number(topup.price_idr)
+      if (!Number.isFinite(event.amount) || event.amount !== expected) {
+        request.log.warn(
+          { ref: event.provider_ref, expected, got: event.amount, provider: event.provider },
+          'webhook amount mismatch — dibatalkan'
+        )
+        return reply.code(400).send({ error: 'Amount mismatch' })
+      }
     }
 
     const ok = await queryOne('select process_topup_success($1) as ok', [topup.id])
@@ -126,10 +138,10 @@ export default async function topupRoutes(app) {
       (_req, body, done) => done(null, body)
     )
     scope.post('/api/topup/webhook/generic', {
-      config: { rateLimit: false },
+      config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
     }, handleWebhook)
     scope.post('/api/topup/webhook/tripay', {
-      config: { rateLimit: false },
+      config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
     }, handleWebhook)
   })
 }

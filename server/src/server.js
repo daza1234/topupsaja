@@ -14,12 +14,20 @@ import publicRoutes from './routes/publicRoutes.js'
 import { startScheduler } from './jobs/scheduler.js'
 
 const app = Fastify({
+  trustProxy: true,
   logger: config.isProd
     ? { level: 'warn' }
     : { level: 'info', transport: undefined },
 })
 
-await app.register(cors, { origin: true })
+await app.register(cors, {
+  origin: (origin, cb) => {
+    // Request tanpa Origin (curl, CLI, same-origin) tetap diizinkan.
+    if (!origin) return cb(null, true)
+    cb(null, config.corsOrigins.includes(origin))
+  },
+  credentials: true,
+})
 await app.register(rateLimit, {
   global: true,
   max: 300,

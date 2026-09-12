@@ -8,6 +8,25 @@ function issueToken(app, userId) {
   return app.jwt.sign({ sub: userId }, { expiresIn: '30d' })
 }
 
+/** Set cookie sesi httpOnly (httpOnly, SameSite=Lax, Secure di prod, 30d). */
+function setSessionCookie(reply, token) {
+  const parts = [
+    `ts_token=${encodeURIComponent(token)}`,
+    'HttpOnly',
+    'SameSite=Lax',
+    'Path=/',
+    `Max-Age=${30 * 24 * 3600}`,
+  ]
+  if (config.isProd) parts.push('Secure')
+  reply.header('Set-Cookie', parts.join('; '))
+}
+
+function clearSessionCookie(reply) {
+  const parts = ['ts_token=', 'HttpOnly', 'SameSite=Lax', 'Path=/', 'Max-Age=0']
+  if (config.isProd) parts.push('Secure')
+  reply.header('Set-Cookie', parts.join('; '))
+}
+
 export default async function authRoutes(app) {
   /** POST /api/auth/register */
   app.post('/api/auth/register', {
@@ -51,10 +70,20 @@ export default async function authRoutes(app) {
       'select id, email, role, balance_credits from users where id = $1',
       [user.id]
     )
+    const token = issueToken(app, user.id)
+    setSessionCookie(reply, token)
     return reply.code(201).send({
-      token: issueToken(app, user.id),
+      token,
       user: { ...fresh, balance_credits: Number(fresh.balance_credits) },
     })
+  })
+
+  /** POST /api/auth/logout — hapus cookie sesi */
+  app.post('/api/auth/logout', {
+    config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    clearSessionCookie(reply)
+    return { ok: true }
   })
 
   /** POST /api/auth/login */
@@ -80,8 +109,10 @@ export default async function authRoutes(app) {
       await query("update users set role = 'admin' where id = $1", [user.id])
       user.role = 'admin'
     }
+    const token = issueToken(app, user.id)
+    setSessionCookie(reply, token)
     return {
-      token: issueToken(app, user.id),
+      token,
       user: {
         id: user.id, email: user.email, role: user.role,
         balance_credits: Number(user.balance_credits),
@@ -149,8 +180,10 @@ export default async function authRoutes(app) {
         'select id, email, role, balance_credits from users where id = $1',
         [created.id]
       )
+      const token = issueToken(app, created.id)
+      setSessionCookie(reply, token)
       return reply.code(201).send({
-        token: issueToken(app, created.id),
+        token,
         user: { ...fresh, balance_credits: Number(fresh.balance_credits) },
       })
     }
@@ -159,8 +192,10 @@ export default async function authRoutes(app) {
       await query("update users set role = 'admin' where id = $1", [user.id])
       user.role = 'admin'
     }
+    const token = issueToken(app, user.id)
+    setSessionCookie(reply, token)
     return {
-      token: issueToken(app, user.id),
+      token,
       user: {
         id: user.id, email: user.email, role: user.role,
         balance_credits: Number(user.balance_credits),

@@ -15,6 +15,15 @@ export const config = {
   webUrl: process.env.WEB_URL ?? req('BASE_URL', 'http://localhost:3000'),
   isProd: (process.env.NODE_ENV ?? 'development') === 'production',
 
+  // Allowlist origin untuk CORS (dashboard web). Kosong di env → default prod+dev.
+  corsOrigins: (
+    process.env.CORS_ORIGINS ??
+    'https://topupsaja.com,https://ai.topupsaja.com,https://api.topupsaja.com,http://localhost:3001,http://localhost:3000'
+  )
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+
   databaseUrl: req('DATABASE_URL', ''),
 
   jwtSecret: req('JWT_SECRET', 'dev-secret-change-me'),

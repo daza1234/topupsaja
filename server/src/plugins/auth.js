@@ -2,6 +2,20 @@ import fp from 'fastify-plugin'
 import { verifyApiKey } from '../lib/keys.js'
 import { queryOne } from '../db.js'
 
+/** Baca token sesi dari cookie httpOnly `ts_token` (fallback: Authorization header). */
+export function getSessionToken(request) {
+  const cookie = request.headers.cookie ?? ''
+  for (const part of cookie.split(';')) {
+    const idx = part.indexOf('=')
+    if (idx === -1) continue
+    if (part.slice(0, idx).trim() === 'ts_token') {
+      return decodeURIComponent(part.slice(idx + 1).trim())
+    }
+  }
+  const header = request.headers.authorization ?? ''
+  return header.startsWith('Bearer ') ? header.slice(7) : ''
+}
+
 export default fp(async (app) => {
   // ── API key user (Authorization: Bearer sk-ts-...) ──
   app.decorate('authenticateApiKey', async (request, reply) => {
@@ -24,7 +38,7 @@ export default fp(async (app) => {
   // ── Session JWT (dashboard) ──
   app.decorate('authenticateSession', async (request, reply) => {
     try {
-      await request.jwtVerify()
+      await request.jwtVerify(getSessionToken(request))
     } catch {
       return reply.code(401).send({ error: 'Unauthorized' })
     }

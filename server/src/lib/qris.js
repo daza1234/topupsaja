@@ -97,7 +97,13 @@ const tripayProvider = {
 
     const body = JSON.parse(rawBody.toString('utf8'))
     const paid = (body.status ?? '').toUpperCase() === 'PAID'
-    return { provider_ref: body.merchant_ref, paid, provider: 'tripay' }
+    return {
+      provider_ref: body.merchant_ref,
+      paid,
+      provider: 'tripay',
+      // Total dibayar menurut Tripay — divalidasi ulang vs topups.price_idr.
+      amount: Number(body.total_amount ?? body.amount),
+    }
   },
 }
 
@@ -164,6 +170,11 @@ const genericProvider = {
     const ref = body.external_id ?? body.order_id ?? body.ref
     const status = (body.status ?? body.transaction_status ?? '').toLowerCase()
     const paid = ['paid', 'settlement', 'capture', 'success', 'settled'].includes(status)
-    return { provider_ref: ref, paid, provider: 'generic' }
+    return {
+      provider_ref: ref,
+      paid,
+      provider: 'generic',
+      amount: Number(body.amount ?? body.total_amount),
+    }
   },
 }

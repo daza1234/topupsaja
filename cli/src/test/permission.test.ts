@@ -128,8 +128,8 @@ test('decide: deny rule pada write_file path glob', () => {
   const manager = pm('yolo', rules)
   assert.equal(manager.decide('write_file', { path: '.env' }, { readOnlyMode: false }), 'deny')
   assert.equal(manager.decide('write_file', { path: 'app.env.local' }, { readOnlyMode: false }), 'deny')
-  // `*` tidak melewati slash → nested tidak kena rule ini
-  assert.equal(manager.decide('write_file', { path: 'config/app.env' }, { readOnlyMode: false }), 'allow')
+  // `*` tidak melewati slash → nested tidak kena rule deny → jatuh ke gate secret-path (ask)
+  assert.equal(manager.decide('write_file', { path: 'config/app.env' }, { readOnlyMode: false }), 'ask')
   assert.equal(manager.decide('write_file', { path: 'src/a.ts' }, { readOnlyMode: false }), 'allow')
 
   // `**` untuk path nested
