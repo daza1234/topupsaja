@@ -1,0 +1,24 @@
+{
+  "name": "topupsaja-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TopUpSaja AI Gateway API — OpenAI-compatible proxy with prepaid credits (upstream: OpenRouter)",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "sync": "node src/jobs/run-sync-once.js",
+    "check": "node --check src/server.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/jwt": "^9.0.1",
+    "@fastify/rate-limit": "^10.1.1",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "fastify": "^5.1.0",
+    "fastify-plugin": "^5.1.0",
+    "node-cron": "^3.0.3",
+    "pg": "^8.13.1"
+  }
+}

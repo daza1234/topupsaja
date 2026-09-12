@@ -1,0 +1,22 @@
+[Unit]
+Description=TopUpSaja Web (Next.js)
+After=network.target topupsaja-api.service
+Wants=topupsaja-api.service
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/opt/topupsaja/web
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=NEXT_PUBLIC_API_URL=https://api.topupsaja.com
+Environment=NEXT_PUBLIC_GOOGLE_CLIENT_ID=
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -p 3000
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

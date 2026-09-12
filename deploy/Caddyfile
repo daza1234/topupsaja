@@ -1,0 +1,13 @@
+# /etc/caddy/Caddyfile — reverse proxy + TLS otomatis (Let's Encrypt)
+# DNS ai.topupsaja.com dan api.topupsaja.com HARUS sudah mengarah ke IP VM ini
+# sebelum Caddy start, supaya issuance sertifikat berhasil.
+
+ai.topupsaja.com {
+	encode zstd gzip
+	reverse_proxy localhost:3000
+}
+
+api.topupsaja.com {
+	encode zstd gzip
+	reverse_proxy localhost:3001
+}

@@ -1,0 +1,20 @@
+[Unit]
+Description=TopUpSaja API (Fastify)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/opt/topupsaja/server
+EnvironmentFile=/opt/topupsaja/server/.env
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=3
+# Hardening ringan
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.local
+.env*.local
+.next/
+out/
+*.log
+.DS_Store
+cli/dist/
+.tsa/
+*.tmp.mjs
