@@ -66,4 +66,26 @@ export default async function userRoutes(app) {
       [request.userRow.id]
     )
   })
+
+  /** GET /api/me/sessions — daftar perangkat aktif */
+  app.get('/api/me/sessions', { preHandler: [app.authenticateSession] }, async (request) => {
+    return query(
+      `select id, user_agent, ip, created_at, last_used_at,
+              coalesce(id = $2, false) as is_current
+       from sessions
+       where user_id = $1 and revoked_at is null and expires_at > now()
+       order by last_used_at desc`,
+      [request.userRow.id, request.sessionId]
+    )
+  })
+
+  /** DELETE /api/me/sessions/:id — revoke perangkat milik sendiri */
+  app.delete('/api/me/sessions/:id', { preHandler: [app.authenticateSession] }, async (request, reply) => {
+    const row = await queryOne(
+      'update sessions set revoked_at = now() where id = $1 and user_id = $2 and revoked_at is null returning id',
+      [request.params.id, request.userRow.id]
+    )
+    if (!row) return reply.code(404).send({ error: 'Sesi tidak ditemukan' })
+    return { ok: true }
+  })
 }

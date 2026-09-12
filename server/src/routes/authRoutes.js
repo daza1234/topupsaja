@@ -3,19 +3,58 @@ import crypto from 'node:crypto'
 import { config } from '../config.js'
 import { query, queryOne } from '../db.js'
 import { addCredits } from '../lib/billing.js'
+import { getSessionToken } from '../plugins/auth.js'
 
-function issueToken(app, userId) {
-  return app.jwt.sign({ sub: userId }, { expiresIn: '30d' })
+const SESSION_TTL_DAYS = 90
+const MAX_SESSIONS = 20
+
+/**
+ * Buat sesi perangkat baru: token opaque random (dikirim via cookie),
+ * disimpan di DB sebagai sha256 hash. Maks 20 sesi aktif per user —
+ * sesi aktif terlama dihapus saat melebihi batas.
+ */
+async function createSession(userId, request) {
+  const userAgent = String(request.headers['user-agent'] ?? '').slice(0, 500)
+  const ip = request.ip
+  // Jaga batas sesi aktif
+  await query(
+    `delete from sessions
+     where user_id = $1
+       and revoked_at is null
+       and expires_at > now()
+       and id not in (
+         select id from sessions
+         where user_id = $1 and revoked_at is null and expires_at > now()
+         order by last_used_at desc
+         limit $2
+       )`,
+    [userId, MAX_SESSIONS]
+  )
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const token = crypto.randomBytes(32).toString('base64url')
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+    try {
+      await query(
+        `insert into sessions (user_id, token_hash, user_agent, ip, expires_at)
+         values ($1, $2, $3, $4, now() + ($5 || ' days')::interval)`,
+        [userId, tokenHash, userAgent, ip, SESSION_TTL_DAYS]
+      )
+      return token
+    } catch (err) {
+      // Benturan token_hash unik sangat mustahil — retry sekali
+      if (attempt === 1 || err.code !== '23505') throw err
+    }
+  }
 }
 
-/** Set cookie sesi httpOnly (httpOnly, SameSite=Lax, Secure di prod, 30d). */
+/** Set cookie sesi httpOnly (httpOnly, SameSite=Lax, Secure di prod, 90d). */
 function setSessionCookie(reply, token) {
   const parts = [
     `ts_token=${encodeURIComponent(token)}`,
     'HttpOnly',
     'SameSite=Lax',
     'Path=/',
-    `Max-Age=${30 * 24 * 3600}`,
+    `Max-Age=${SESSION_TTL_DAYS * 24 * 3600}`,
   ]
   if (config.isProd) parts.push('Secure')
   reply.header('Set-Cookie', parts.join('; '))
@@ -76,18 +115,22 @@ export default async function authRoutes(app) {
       'select id, email, role, balance_credits from users where id = $1',
       [user.id]
     )
-    const token = issueToken(app, user.id)
+    const token = await createSession(user.id, request)
     setSessionCookie(reply, token)
     return reply.code(201).send({
-      token,
       user: { ...fresh, balance_credits: Number(fresh.balance_credits) },
     })
   })
 
-  /** POST /api/auth/logout — hapus cookie sesi */
+  /** POST /api/auth/logout — revoke sesi (bila opaque) + hapus cookie sesi */
   app.post('/api/auth/logout', {
     config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
   }, async (request, reply) => {
+    const token = getSessionToken(request)
+    if (token && !/^[\w-]+\.[\w-]+\.[\w-]+$/.test(token)) {
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+      await query('update sessions set revoked_at = now() where token_hash = $1 and revoked_at is null', [tokenHash])
+    }
     clearSessionCookie(reply)
     return { ok: true }
   })
@@ -115,10 +158,9 @@ export default async function authRoutes(app) {
       await query("update users set role = 'admin' where id = $1", [user.id])
       user.role = 'admin'
     }
-    const token = issueToken(app, user.id)
+    const token = await createSession(user.id, request)
     setSessionCookie(reply, token)
     return {
-      token,
       user: {
         id: user.id, email: user.email, role: user.role,
         balance_credits: Number(user.balance_credits),
@@ -187,10 +229,9 @@ export default async function authRoutes(app) {
         'select id, email, role, balance_credits from users where id = $1',
         [created.id]
       )
-      const token = issueToken(app, created.id)
+      const token = await createSession(created.id, request)
       setSessionCookie(reply, token)
       return reply.code(201).send({
-        token,
         user: { ...fresh, balance_credits: Number(fresh.balance_credits) },
       })
     }
@@ -199,10 +240,9 @@ export default async function authRoutes(app) {
       await query("update users set role = 'admin' where id = $1", [user.id])
       user.role = 'admin'
     }
-    const token = issueToken(app, user.id)
+    const token = await createSession(user.id, request)
     setSessionCookie(reply, token)
     return {
-      token,
       user: {
         id: user.id, email: user.email, role: user.role,
         balance_credits: Number(user.balance_credits),
