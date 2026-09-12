@@ -9,3 +9,5 @@ out/
 cli/dist/
 .tsa/
 *.tmp.mjs
+# web/ punya repo git sendiri (github daza1234/-topupsaja-web) — tracked di sana
+web/
