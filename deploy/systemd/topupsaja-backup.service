@@ -1,0 +1,7 @@
+[Unit]
+Description=TopUpSaja daily pg_dump backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/topupsaja/deploy/backup-db.sh
