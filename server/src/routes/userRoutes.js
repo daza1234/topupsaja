@@ -10,6 +10,7 @@ export default async function userRoutes(app) {
       email: u.email,
       role: u.role,
       balance_credits: Number(u.balance_credits),
+      email_verified_at: u.email_verified_at ?? null,
     }
   })
 
@@ -20,6 +21,9 @@ export default async function userRoutes(app) {
 
   /** POST /api/me/keys — generate key baru (max 5 aktif) */
   app.post('/api/me/keys', { preHandler: [app.authenticateSession] }, async (request, reply) => {
+    if (!request.userRow.email_verified_at) {
+      return reply.code(403).send({ error: 'email_not_verified' })
+    }
     const label = String(request.body?.label ?? 'default').slice(0, 40)
     const active = await queryOne(
       'select count(*)::int as n from api_keys where user_id = $1 and is_active = true',

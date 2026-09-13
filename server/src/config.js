@@ -27,6 +27,15 @@ export const config = {
   databaseUrl: req('DATABASE_URL', ''),
 
   jwtSecret: req('JWT_SECRET', 'dev-secret-change-me'),
+  // Rotasi: verifikasi fallback ke secret lama (hapus setelah 30 hari)
+  jwtSecretOld: process.env.JWT_SECRET_OLD ?? '',
+
+  // Origin web untuk link email verifikasi (bukan BASE_URL/api)
+  webOrigin: process.env.WEB_ORIGIN ?? 'https://topupsaja.com',
+
+  // Gmail SMTP (app password) — kosong = fitur verif degrade aman
+  smtpUser: process.env.SMTP_USER ?? '',
+  smtpAppPassword: process.env.SMTP_APP_PASSWORD ?? '',
 
   openrouter: {
     apiKey: req('OPENROUTER_API_KEY', ''),

@@ -22,6 +22,9 @@ export default async function topupRoutes(app) {
     preHandler: [app.authenticateSession],
     config: { rateLimit: { max: 20, timeWindow: '1 hour' } },
   }, async (request, reply) => {
+    if (!request.userRow.email_verified_at) {
+      return reply.code(403).send({ error: 'email_not_verified' })
+    }
     const code = String(request.body?.package_code ?? '')
     const pkg = await queryOne(
       'select * from credit_packages where code = $1 and is_active = true',

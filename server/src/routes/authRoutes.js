@@ -3,10 +3,23 @@ import crypto from 'node:crypto'
 import { config } from '../config.js'
 import { query, queryOne } from '../db.js'
 import { addCredits } from '../lib/billing.js'
+import { sendVerificationEmail } from '../lib/mailer.js'
 import { getSessionToken } from '../plugins/auth.js'
 
 const SESSION_TTL_DAYS = 90
 const MAX_SESSIONS = 20
+
+/** Buat token verifikasi email (plaintext → email, sha256 hash → DB, 24 jam). */
+async function createEmailVerificationToken(userId, email) {
+  const token = crypto.randomBytes(32).toString('base64url')
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+  await query(
+    `update users set email_verify_token_hash = $2, email_verify_expires_at = now() + interval '24 hours'
+     where id = $1`,
+    [userId, tokenHash]
+  )
+  await sendVerificationEmail(email, token)
+}
 
 /**
  * Buat sesi perangkat baru: token opaque random (dikirim via cookie),
@@ -117,9 +130,49 @@ export default async function authRoutes(app) {
     )
     const token = await createSession(user.id, request)
     setSessionCookie(reply, token)
+    // Kirim email verifikasi di luar response-critical path; register tetap sukses.
+    await createEmailVerificationToken(user.id, emailNorm)
     return reply.code(201).send({
       user: { ...fresh, balance_credits: Number(fresh.balance_credits) },
     })
+  })
+
+  /** GET /api/auth/verify?token= — link dari email → verifikasi → redirect dashboard */
+  app.get('/api/auth/verify', {
+    config: { rateLimit: { max: 30, timeWindow: '1 hour' } },
+  }, async (request, reply) => {
+    const token = String(request.query.token ?? '')
+    if (!token) return reply.code(400).send({ error: 'Token verifikasi tidak valid' })
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+    const user = await queryOne(
+      `select id from users
+       where email_verify_token_hash = $1 and email_verify_expires_at > now()`,
+      [tokenHash]
+    )
+    if (!user) return reply.code(400).send({ error: 'Token tidak valid atau kedaluwarsa' })
+    await query(
+      `update users set email_verified_at = now(), email_verify_token_hash = null,
+              email_verify_expires_at = null
+       where id = $1`,
+      [user.id]
+    )
+    return reply.redirect(`${config.webOrigin}/verify?status=ok`)
+  })
+
+  /** POST /api/auth/resend-verification — kirim ulang email (auth sesi) */
+  app.post('/api/auth/resend-verification', {
+    preHandler: [app.authenticateSession],
+    // 3/hari per sesi-IP; sesi = 1 user, cukup sebagai batas pengiriman
+    config: { rateLimit: { max: 3, timeWindow: '1 day' } },
+  }, async (request, reply) => {
+    const user = await queryOne(
+      'select id, email, email_verified_at from users where id = $1',
+      [request.userRow.id]
+    )
+    if (!user) return reply.code(401).send({ error: 'Unauthorized' })
+    if (user.email_verified_at) return { ok: true, already_verified: true }
+    await createEmailVerificationToken(user.id, user.email)
+    return { ok: true }
   })
 
   /** POST /api/auth/logout — revoke sesi (bila opaque) + hapus cookie sesi */
@@ -199,7 +252,7 @@ export default async function authRoutes(app) {
     const emailNorm = String(info.email).trim().toLowerCase()
 
     const user = await queryOne(
-      'select id, email, role, balance_credits, is_active from users where email = $1',
+      'select id, email, role, balance_credits, is_active, email_verified_at from users where email = $1',
       [emailNorm]
     )
     if (user && !user.is_active) {
@@ -210,8 +263,8 @@ export default async function authRoutes(app) {
       const hash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10)
       const role = config.adminEmails.includes(emailNorm) ? 'admin' : 'user'
       const created = await queryOne(
-        `insert into users (email, password_hash, role, consent_accepted_at)
-         values ($1, $2, $3, now())
+        `insert into users (email, password_hash, role, consent_accepted_at, email_verified_at)
+         values ($1, $2, $3, now(), now())
          returning id, email, role, balance_credits`,
         [emailNorm, hash, role]
       )
@@ -236,6 +289,10 @@ export default async function authRoutes(app) {
       })
     }
 
+    // Email Google sudah terverifikasi Google — tandai sekali (grandfathering aman)
+    if (user.email_verified_at === null) {
+      await query('update users set email_verified_at = now() where id = $1', [user.id])
+    }
     if (user.role !== 'admin' && config.adminEmails.includes(user.email)) {
       await query("update users set role = 'admin' where id = $1", [user.id])
       user.role = 'admin'
