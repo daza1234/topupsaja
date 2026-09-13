@@ -1,7 +1,8 @@
 import fp from 'fastify-plugin'
 import crypto from 'node:crypto'
 import { verifyApiKey } from '../lib/keys.js'
-import { queryOne } from '../db.js'
+import { query, queryOne } from '../db.js'
+import { config } from '../config.js'
 
 /** Baca token sesi dari cookie httpOnly `ts_token` (fallback: Authorization header). */
 export function getSessionToken(request) {
@@ -15,6 +16,19 @@ export function getSessionToken(request) {
   }
   const header = request.headers.authorization ?? ''
   return header.startsWith('Bearer ') ? header.slice(7) : ''
+}
+
+/**
+ * Verifikasi JWT legacy dengan dual-secret (rotasi tanpa logout):
+ * secret baru dulu, fallback ke JWT_SECRET_OLD. Sign selalu pakai secret baru.
+ */
+export function verifySessionToken(jwt, token) {
+  try {
+    return jwt.verify(token)
+  } catch (err) {
+    if (config.jwtSecretOld) return jwt.verify(token, { key: config.jwtSecretOld })
+    throw err
+  }
 }
 
 export default fp(async (app) => {
@@ -44,12 +58,12 @@ export default fp(async (app) => {
     // JWT legacy (3 segmen): verifikasi seperti sebelumnya, tanpa sesi DB
     if ((token.match(/\./g) ?? []).length === 2) {
       try {
-        request.user = app.jwt.verify(token)
+        request.user = verifySessionToken(app.jwt, token)
       } catch {
         return reply.code(401).send({ error: 'Unauthorized' })
       }
       const user = await queryOne(
-        'select id, email, role, balance_credits, is_active from users where id = $1',
+        'select id, email, role, balance_credits, is_active, email_verified_at from users where id = $1',
         [request.user.sub]
       )
       if (!user || !user.is_active) {
@@ -64,7 +78,7 @@ export default fp(async (app) => {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
     const row = await queryOne(
       `select s.id as session_id, s.last_used_at, s.expires_at, s.revoked_at,
-              u.id, u.email, u.role, u.balance_credits, u.is_active
+              u.id, u.email, u.role, u.balance_credits, u.is_active, u.email_verified_at
        from sessions s
        join users u on u.id = s.user_id
        where s.token_hash = $1`,
@@ -78,7 +92,7 @@ export default fp(async (app) => {
       await query('update sessions set last_used_at = now() where id = $1', [row.session_id])
     }
     request.user = { sub: row.id }
-    request.userRow = { id: row.id, email: row.email, role: row.role, balance_credits: row.balance_credits, is_active: row.is_active }
+    request.userRow = { id: row.id, email: row.email, role: row.role, balance_credits: row.balance_credits, is_active: row.is_active, email_verified_at: row.email_verified_at }
     request.sessionId = row.session_id
   })
 
