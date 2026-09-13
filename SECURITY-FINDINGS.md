@@ -9,7 +9,8 @@ Audit: 2026-09-12 · Cakupan: server API (Fastify), web dashboard (Next.js), CLI
 | HIGH | CORS wide-open (`origin: true`) | ✅ FIXED — allowlist `CORS_ORIGINS` |
 | HIGH | `trustProxy` tidak diset → rate limit global dibagi semua user | ✅ FIXED — `trustProxy: true` (Caddy satu hop) |
 | HIGH | JWT sesi di `localStorage` (XSS → pencurian token) | ✅ FIXED — cookie `ts_token` httpOnly + endpoint logout |
-| HIGH | Tidak ada security headers (HSTS/XFO/CSP/Referrer-Policy) | ✅ FIXED — via Caddyfile, CSP Report-Only 1 hari |
+| HIGH | Tidak ada security headers (HSTS/XFO/CSP/Referrer-Policy) | ✅ FIXED — via Caddyfile, CSP **enforced** 2026-09-13 |
+| HIGH | Email tidak terverifikasi bisa beli credit / buat API key | ✅ FIXED — verifikasi email (Gmail SMTP) + gate 403 `email_not_verified` di create API key & topup; Google login auto-verify |
 | MED | Webhook QRIS tidak verifikasi `total_amount` vs order | ✅ FIXED — mismatch → log + HTTP 400, tanpa kredit |
 | MED | Webhook tanpa rate limit khusus | ✅ FIXED — 60/min/IP per path webhook |
 | MED | `/api/topup/status/:id` otorisasi pemilik | ✅ SUDAH AMAN sejak awal (query scoped `user_id`) |
@@ -17,7 +18,7 @@ Audit: 2026-09-12 · Cakupan: server API (Fastify), web dashboard (Next.js), CLI
 | LOW | Register memberi 2.000.000 credit gratis tanpa email verifikasi | 📝 Roadmap (keputusan bisnis) |
 | LOW | JWT 30d tanpa revocation list; bcrypt cost 10; session log CLI plaintext | 📝 Roadmap |
 | LOW | `verifyApiKey` lookup by prefix 8-char `limit 20` — collision prefix disaring bcrypt, tapi lookup massal tiap request bisa dioptimalkan | 📝 Roadmap |
-| LOW | CSP masih Report-Only | 📝 Enforce setelah ±1 hari tanpa laporan |
+| LOW | CSP masih Report-Only | ✅ Enforced 2026-09-13 (rollback: `/etc/caddy/Caddyfile.bak-20260912-sec`) |
 
 ## Detail fix yang di-deploy
 
@@ -38,7 +39,14 @@ Audit: 2026-09-12 · Cakupan: server API (Fastify), web dashboard (Next.js), CLI
 - Test: `cli/src/test/secrets.test.ts` + assertion `permission.test.ts` diperbarui. Suite penuh 170/170 pass.
 
 ### Infra
-- `/etc/caddy/Caddyfile` — snippet `security-headers` (HSTS 1y includeSubDomains, nosniff, X-Frame-Options DENY, Referrer-Policy strict-origin-when-cross-origin) + CSP Report-Only di site web. Backup: `Caddyfile.bak-20260912-sec`.
+- `/etc/caddy/Caddyfile` — snippet `security-headers` (HSTS 1y includeSubDomains, nosniff, X-Frame-Options DENY, Referrer-Policy strict-origin-when-cross-origin) + CSP **enforced** (2026-09-13, semula Report-Only 2026-09-12). Backup: `Caddyfile.bak-20260912-sec`.
+- `deploy/backup-db.sh` + `topupsaja-backup.service/.timer` — pg_dump harian 03:30 WIB ke `/home/ubuntu/backups/` (0700), retensi 14 hari. Aktif & tervalidasi (`gunzip -t` OK).
+- `deploy/harden.sh` — fail2ban (jail sshd aktif) + unattended-upgrades security harian. Terpasang 2026-09-13.
+
+### Rotasi JWT_SECRET (2026-09-13)
+- `JWT_SECRET` diganti dengan random 64-hex baru; secret lama dipindah ke `JWT_SECRET_OLD` di `/opt/topupsaja/server/.env` (tidak masuk git/log).
+- Dual-secret: verifikasi secret baru → fallback lama (`verifySessionToken` di `plugins/auth.js`); sign selalu secret baru. Token lama tetap valid (dites 200 di `/api/me`).
+- ⚠️ **Kalender: hapus `JWT_SECRET_OLD` dari `.env` VM pada 2026-10-13** lalu `sudo systemctl restart topupsaja-api`.
 - systemd unit sudah punya hardening ringan (NoNewPrivileges, PrivateTmp, ProtectSystem=full) — tidak diubah.
 
 ## Akte produksi (2026-09-12)
@@ -52,11 +60,11 @@ Audit: 2026-09-12 · Cakupan: server API (Fastify), web dashboard (Next.js), CLI
 - ✅ `curl -I https://topupsaja.com` → HSTS/XFO/nosniff/Referrer-Policy/CSP-Report-Only; web 200, api 200
 - ✅ CLI secret-path: unit test (`decide()` → `ask` untuk `.env`/`~/.topupsaja` bahkan mode yolo+allowlist)
 - ⏳ Login via browser (email + tombol Google), tampilan dashboard, top up kecil PAID end-to-end — perlu konfirmasi user
+- ✅ (2026-09-13) Gate verifikasi email: register baru → create API key & topup → 403 `email_not_verified`; setelah verifikasi → 201. Token verify link → 302 `/verify?status=ok`. Token lama (secret lama) → `/api/me` 200.
 
 ## Rekomendasi lanjutan (belum diimplementasi)
 
-1. Enforce CSP (hapus `-Report-Only`) setelah cek pelanggaran 1 hari.
-2. Email verification + JWT refresh/revocation untuk memperpendek masa token.
-3. Cron `pg_dump` ke `/home/ubuntu/backups/` + retensi (belum ditemukan saat audit).
-4. Rotasi `JWT_SECRET`/kredensial Tripay (manual, window maintenance).
-5. Fail2ban untuk ssh, `unattended-upgrades` aktif — verifikasi di audit infra berikutnya.
+1. ~~Enforce CSP~~ ✅ 2026-09-13. ~~Email verification~~ ✅ 2026-09-13. ~~Cron pg_dump~~ ✅. ~~Fail2ban + unattended-upgrades~~ ✅. ~~Rotasi JWT_SECRET~~ ✅ dual-secret (hapus OLD: 2026-10-13).
+2. JWT refresh/revocation untuk memperpendek masa token (roadmap).
+3. Rotasi kredensial Tripay (manual, window maintenance — koordinasi dashboard Tripay).
+4. Isi `SMTP_USER` + `SMTP_APP_PASSWORD` di `.env` VM (app password Gmail) agar email verifikasi terkirim; sementara kosong → fitur degrade aman (log warning), fallback: admin set `email_verified_at` manual via SQL.
