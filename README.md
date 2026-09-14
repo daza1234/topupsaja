@@ -10,7 +10,10 @@ harga OpenRouter tiap 15 menit (margin selalu terlindungi).
 ```
 topupsaja/
 ├── server/          # Fastify API (proxy, auth, billing, admin, QRIS)
+├── core/            # Logika bisnis bersama (shared TS)
 ├── migrations/      # SQL: jalankan urut 001 → 002 → 003 → 004
+├── desktop/         # App desktop Tauri (produk utama end-user)
+├── cli/             # CLI (deprecated, masih jalan)
 └── web/             # Next.js: landing, models, docs, dashboard, status
 ```
 
@@ -54,6 +57,40 @@ cp .env.local.example .env.local   # NEXT_PUBLIC_API_URL=http://localhost:3000
 npm install
 npm run dev                        # http://localhost:3001
 ```
+
+## Aplikasi Desktop
+
+Aplikasi desktop (Tauri) adalah **produk utama untuk end-user** — antarmuka
+dashboard/top up dalam satu app, tanpa perlu buka browser.
+
+### Unduh & Install
+
+Artefak tersedia di [GitHub Releases](https://github.com/daza1234/topupsaja/releases/latest):
+
+| OS | Format | Updater otomatis |
+| --- | --- | --- |
+| Linux | `.AppImage` | ✅ (chmod +x, jalankan langsung) |
+| Linux | `.deb` | ❌ (update manual via apt/dpkg) |
+| Windows | `.exe` (NSIS installer) | ✅ |
+
+### Updater
+
+App punya tombol versi (`v0.1.x`) di header untuk cek update. Update
+di-download + diverifikasi signature (minisign pubkey ter-embed di
+`desktop/src-tauri/tauri.conf.json`), lalu app relaunch otomatis.
+
+Catatan build/release:
+- Artefak `latest.json` (manifest updater) di-generate via
+  `node desktop/scripts/gen-latest-json.mjs` setelah build, lalu di-upload
+  bersama artefak release.
+- Signing build butuh env `TAURI_SIGNING_PRIVATE_KEY` (**isi file key**,
+  bukan path — variant `_PATH` tidak didukung CLI ini) +
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+
+### CLI (deprecated)
+
+CLI (`cli/`) masih berfungsi tapi tidak lagi menjadi produk utama —
+gunakan aplikasi desktop.
 
 ## Setup Produksi (ringkas)
 

@@ -118,10 +118,17 @@ Di VM:
 
 ```bash
 cd /opt/topupsaja/web
-sudo -u deploy env NEXT_PUBLIC_API_URL=https://api.topupsaja.com NEXT_PUBLIC_GOOGLE_CLIENT_ID=GANTI_CLIENT_ID_GOOGLE /usr/bin/npm run build
+sudo -u deploy /usr/bin/npm run build
 ```
 
-> `NEXT_PUBLIC_*` dibaca saat **build**, bukan saat runtime. Jangan build tanpa env ini — homepage akan fetch ke `localhost` pengunjung dan tombol Google tidak muncul.
+> `NEXT_PUBLIC_*` dibaca saat **build**, bukan saat runtime — Next.js otomatis memuatnya dari `web/.env.local`. Pastikan file `/opt/topupsaja/web/.env.local` ada di VM dan berisi:
+>
+> ```
+> NEXT_PUBLIC_API_URL=https://api.topupsaja.com
+> NEXT_PUBLIC_GOOGLE_CLIENT_ID=<client_id>
+> ```
+>
+> File ini di-exclude dari rsync `deploy.sh` dan tidak di-commit. Jangan build tanpa file ini — homepage akan fetch ke `localhost` pengunjung dan tombol Google tidak muncul. Jika `.next` dimiliki root (dari build lama), perbaiki dulu: `sudo chown -R deploy:deploy /opt/topupsaja/web/.next`.
 
 Pasang service:
 
@@ -203,7 +210,7 @@ topupsaja        # TUI hidup, model terambil dari API produksi
 ## Troubleshooting
 
 - **Caddy gagal issue sertifikat** → DNS belum propagate; `journalctl -u caddy -f`. Port 80/443 harus terbuka di security list Oracle **dan** ufw.
-- **Homepage kosong (tanpa paket/model)** → API mati saat build, atau `NEXT_PUBLIC_API_URL` tidak diset saat build. Rebuild dengan env itu lalu restart.
+- **Homepage kosong (tanpa paket/model)** → API mati saat build, atau `web/.env.local` tidak ada/tidak berisi `NEXT_PUBLIC_API_URL` di VM. Perbaiki file itu lalu rebuild dan restart.
 - **API 500 koneksi DB** → cek `DATABASE_URL` password & `sudo systemctl status postgresql`.
 - **Web 502** → `systemctl status topupsaja-web` (kemungkinan build belum ada atau port salah).
 - **Oracle idle reclaim** → upgrade Pay-As-You-Go (tetap gratis dalam limit) atau pastikan ada traffic rutin; simpan snapshot.
