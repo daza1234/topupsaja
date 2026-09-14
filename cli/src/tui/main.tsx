@@ -1,4 +1,4 @@
-import type { AgentRuntime } from '../agent/runtime.js'
+import type { AgentRuntime } from '@topupsaja/core/agent/runtime.js'
 
 /** Entry TUI Ink — hanya dipanggil di jalur TTY via dynamic import agar
  *  fallback non-TTY tidak pernah me-load react/ink. */

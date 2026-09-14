@@ -1,16 +1,12 @@
-import { execFile } from 'node:child_process'
+import { join, resolve } from 'pathe'
+import { getHost } from '../host.js'
 import { streamChat } from '../api.js'
 import type { AgentRuntime } from './runtime.js'
 
 const MAX_DIFF_CHARS = 40_000
 
 function execFileP(cmd: string, args: string[], cwd: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(cmd, args, { cwd, maxBuffer: 8 * 1024 * 1024, timeout: 30_000 }, (err, stdout, stderr) => {
-      if (err) reject(new Error(String(stderr || err.message)))
-      else resolve(String(stdout))
-    })
-  })
+  return getHost().exec.execFile(cmd, args, { cwd, maxBuffer: 8 * 1024 * 1024, timeout: 30_000 })
 }
 
 /** Repo git? (git rev-parse --is-inside-work-tree) */

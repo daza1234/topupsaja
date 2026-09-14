@@ -1,7 +1,5 @@
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
-import crypto from 'node:crypto'
+import { join } from 'pathe'
+import { getHost } from '../host.js'
 import { ChatMessage } from '../api.js'
 import { TodoItem, TodoStore } from '../storage/todo.js'
 import type { PermissionMode } from '../config.js'
@@ -59,8 +57,8 @@ export interface SessionMeta {
 
 /** Dir project: ~/.topupsaja/projects/<hash-cwd>/sessions/ */
 export function projectSessionDir(cwd: string): string {
-  const hash = crypto.createHash('sha1').update(cwd).digest('hex').slice(0, 16)
-  return path.join(os.homedir(), '.topupsaja', 'projects', hash, 'sessions')
+  const hash = getHost().crypto.sha1hex(cwd).slice(0, 16)
+  return join(getHost().homedir(), '.topupsaja', 'projects', hash, 'sessions')
 }
 
 function safeTitle(text: string): string {
@@ -104,7 +102,7 @@ export class AgentSession {
 
   static create(cwd: string, model: string, systemPrompt: string): AgentSession {
     const s = new AgentSession({
-      id: new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '-' + crypto.randomBytes(3).toString('hex'),
+      id: new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '-' + getHost().crypto.randomHex(3),
       title: 'sesi baru',
       model,
       created: Date.now(),
@@ -114,9 +112,9 @@ export class AgentSession {
     return s
   }
 
-  static load(cwd: string, id: string): AgentSession | null {
+  static async load(cwd: string, id: string): Promise<AgentSession | null> {
     try {
-      const raw = fs.readFileSync(path.join(projectSessionDir(cwd), `${id}.json`), 'utf8')
+      const raw = await getHost().fs.readFile(join(projectSessionDir(cwd), `${id}.json`), 'utf8')
       const f = JSON.parse(raw) as SessionFile
       const s = new AgentSession({
         id: f.id,
@@ -125,7 +123,7 @@ export class AgentSession {
         created: Date.parse(f.created) || Date.now(),
         cwd: cwd,
       })
-      s.mode = normalizeMode(f.mode, discoverCustomModes(cwd))
+      s.mode = normalizeMode(f.mode, await discoverCustomModes(cwd))
       s.permissionMode = f.permission_mode ?? 'ask'
       s.messages = f.messages ?? []
       s.todos.set(f.todos ?? [])
@@ -164,14 +162,14 @@ export class AgentSession {
   }
 
   file(): string {
-    return path.join(projectSessionDir(this.cwd), `${this.id}.json`)
+    return join(projectSessionDir(this.cwd), `${this.id}.json`)
   }
 
   /** Tulis ulang file sesi (append-safe per turn). */
-  save(): string | null {
+  async save(): Promise<string | null> {
     try {
       const dir = projectSessionDir(this.cwd)
-      fs.mkdirSync(dir, { recursive: true })
+      await getHost().fs.mkdir(dir, { recursive: true })
       const f: SessionFile = {
         id: this.id,
         title: this.title,
@@ -192,7 +190,7 @@ export class AgentSession {
         checkpoints: this.checkpoints,
         permission_log: this.permissionLog,
       }
-      fs.writeFileSync(this.file(), JSON.stringify(f, null, 2) + '\n')
+      await getHost().fs.writeFile(this.file(), JSON.stringify(f, null, 2) + '\n')
       return this.file()
     } catch {
       return null
@@ -201,18 +199,18 @@ export class AgentSession {
 }
 
 /** Daftar metadata sesi untuk cwd, terbaru dulu. */
-export function listSessions(cwd: string): SessionMeta[] {
+export async function listSessions(cwd: string): Promise<SessionMeta[]> {
   const dir = projectSessionDir(cwd)
   let files: string[]
   try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'))
+    files = (await getHost().fs.readdir(dir)).filter((f) => f.endsWith('.json'))
   } catch {
     return []
   }
   const metas: SessionMeta[] = []
   for (const f of files) {
     try {
-      const raw = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as SessionFile
+      const raw = JSON.parse(await getHost().fs.readFile(join(dir, f), 'utf8')) as SessionFile
       metas.push({
         id: raw.id,
         title: raw.title ?? 'sesi baru',
@@ -227,7 +225,7 @@ export function listSessions(cwd: string): SessionMeta[] {
 }
 
 /** Id sesi terbaru untuk cwd (untuk --continue). */
-export function lastSessionId(cwd: string): string | null {
-  const list = listSessions(cwd)
+export async function lastSessionId(cwd: string): Promise<string | null> {
+  const list = await listSessions(cwd)
   return list.length ? list[0].id : null
 }

@@ -1,4 +1,5 @@
-import { exec } from 'node:child_process'
+import { resolve } from 'pathe'
+import { getHost } from '../host.js'
 
 export interface LocalRunResult {
   code: number
@@ -7,21 +8,8 @@ export interface LocalRunResult {
 }
 
 /** Jalankan command shell lokal (dipakai /run, /terminal). Timeout 60s, maxBuffer 1MB. */
-export function runLocal(cwd: string, cmd: string, timeoutMs = 60_000): Promise<LocalRunResult> {
-  return new Promise((resolve) => {
-    exec(
-      cmd,
-      { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024, env: process.env },
-      (err, stdout, stderr) => {
-        let code = 0
-        if (err) {
-          const c = (err as NodeJS.ErrnoException & { code?: number | string }).code
-          code = typeof c === 'number' ? c : (err as Error & { killed?: boolean }).killed ? 124 : 1
-        }
-        resolve({ code, stdout: String(stdout), stderr: String(stderr) })
-      }
-    )
-  })
+export async function runLocal(cwd: string, cmd: string, timeoutMs = 60_000): Promise<LocalRunResult> {
+  return getHost().exec.exec(cmd, { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024, env: getHost().env })
 }
 
 /** Format output [terminal] untuk riwayat + tampilan: fenced block + exit code, cap 10k char. */

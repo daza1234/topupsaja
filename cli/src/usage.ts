@@ -1,11 +1,11 @@
 import type { CustomCommand } from './commands.js'
 import { discoverCommands } from './commands.js'
-import { getApiKey, getBaseUrl, loadConfig, maskKey, saveConfig } from './config.js'
-import { ApiError, verifyKey } from './api.js'
+import { getApiKey, getBaseUrl, loadConfig, maskKey, saveConfig } from '@topupsaja/core/config.js'
+import { ApiError, verifyKey } from '@topupsaja/core/api.js'
 import { fmtNum } from './ui/format.js'
-import { attachPath } from './session/context.js'
-import { rulesSummary } from './agent/rules.js'
-import type { AgentRuntime } from './agent/runtime.js'
+import { attachPath } from '@topupsaja/core/session/context.js'
+import { rulesSummary } from '@topupsaja/core/agent/rules.js'
+import type { AgentRuntime } from '@topupsaja/core/agent/runtime.js'
 
 /**
  * Sumber tunggal daftar slash-command & help — dipakai TUI (autocomplete),
@@ -51,15 +51,15 @@ export function formatDuration(ms: number): string {
 }
 
 /** /settings: teks info config (dipakai overlay TUI & plain, paritas). */
-export function settingsText(rt: AgentRuntime): string {
+export async function settingsText(rt: AgentRuntime): Promise<string> {
   const cmds = discoverCommands(rt.cwd)
-  const cfg = loadConfig()
+  const cfg = await loadConfig()
   return [
     `model      : ${rt.session.model}  (ubah: /model)`,
     `permission : ${rt.permissions.mode}  (ubah: /permissions)`,
     `aturan     : ${rulesSummary(rt.permissions.rules)}`,
-    `base URL   : ${getBaseUrl()}`,
-    `API key    : ${maskKey(getApiKey())}`,
+    `base URL   : ${await getBaseUrl()}`,
+    `API key    : ${maskKey(await getApiKey())}`,
     `hooks      : ${cfg.hooks?.pre_tool_use || cfg.hooks?.post_tool_use ? 'aktif' : 'tidak ada'}`,
     `formatter  : ${cfg.hooks?.format_command || 'tidak ada'}`,
     `commands   : ${cmds.length} kustom (.tsa/commands, ~/.topupsaja/commands)`,
@@ -67,16 +67,16 @@ export function settingsText(rt: AgentRuntime): string {
 }
 
 /** /api: info key masked + base URL + cara ganti key. */
-export function apiText(): string {
-  return `API key: ${maskKey(getApiKey())} · base URL: ${getBaseUrl()} — ganti key: /api <key_baru> (buat key di dashboard web).`
+export async function apiText(): Promise<string> {
+  return `API key: ${maskKey(await getApiKey())} · base URL: ${await getBaseUrl()} — ganti key: /api <key_baru> (buat key di dashboard web).`
 }
 
 /**
  * `/add <path>`: file/folder biasa → lampiran konteks; gambar → user message
  * vision one-shot (diblokir bila model aktif tidak mendukung vision).
  */
-export function addPathMessage(rt: AgentRuntime, target: string): string {
-  const r = attachPath(rt.session, rt.cwd, target)
+export async function addPathMessage(rt: AgentRuntime, target: string): Promise<string> {
+  const r = await attachPath(rt.session, rt.cwd, target)
   if (!r.image) return r.message
   const model = rt.models.find((m) => m.id === rt.session.model)
   if (model && model.supports_vision === false) {
@@ -86,7 +86,7 @@ export function addPathMessage(rt: AgentRuntime, target: string): string {
     role: 'user',
     content: [{ type: 'text', text: `[gambar] ${r.image.path}` }, r.image.part],
   })
-  rt.session.save()
+  await rt.session.save()
   const kb = Math.max(1, Math.round(r.image.bytes / 1024))
   return `Gambar dilampirkan: ${r.image.path} (${fmtNum(kb)} KB)`
 }
@@ -101,11 +101,11 @@ export async function applyApiKey(rt: AgentRuntime, key: string): Promise<string
   }
   try {
     const v = await verifyKey(key)
-    saveConfig({ api_key: key })
+    await saveConfig({ api_key: key })
     // getApiKey() env-first — tanpa set env, sesi berjalan tetap pakai key lama.
     process.env.TOPUPSAJA_API_KEY = key
     rt.session.lastBalance = v.balance
-    rt.session.save()
+    await rt.session.save()
     return `Key valid (${v.email}) · saldo ${fmtNum(v.balance)} credit.`
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) {

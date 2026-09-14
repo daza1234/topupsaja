@@ -1,3 +1,4 @@
+import '../bootstrap.js'
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -12,8 +13,8 @@ import {
   syncContextMessage,
   CONTEXT_MESSAGE_PREFIX,
   normRel,
-} from '../session/context.js'
-import { AgentSession, projectSessionDir } from '../session/store.js'
+} from '@topupsaja/core/session/context.js'
+import { AgentSession, projectSessionDir } from '@topupsaja/core/session/store.js'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-attach-'))
 const origCwd = process.cwd()
@@ -37,18 +38,18 @@ function newSession(): AgentSession {
   return AgentSession.create(tmp, 'ts/gpt-4.1-nano', 'SYSTEM')
 }
 
-test('attachPath: file langsung masuk attached dengan isi', () => {
+test('attachPath: file langsung masuk attached dengan isi', async () => {
   const s = newSession()
-  const r = attachPath(s, tmp, 'visible.txt')
+  const r = await await attachPath(s, tmp, 'visible.txt')
   assert.ok(r.ok)
   assert.equal(s.attached.length, 1)
   assert.equal(s.attached[0].path, 'visible.txt')
   assert.ok(s.attached[0].content.includes('isi visible'))
 })
 
-test('attachPath: folder expand hormati .gitignore, cap 20 file', () => {
+test('attachPath: folder expand hormati .gitignore, cap 20 file', async () => {
   const s = newSession()
-  const r = attachPath(s, tmp, 'docs')
+  const r = await attachPath(s, tmp, 'docs')
   assert.ok(r.ok)
   assert.equal(s.attached.length, 20, 'harus ter-cap 20 file')
   assert.ok(r.message.includes('20 file'))
@@ -58,13 +59,13 @@ test('attachPath: folder expand hormati .gitignore, cap 20 file', () => {
   fs.writeFileSync(path.join(tmp, 'docs2', 'rahasia.txt'), 'x')
   fs.writeFileSync(path.join(tmp, '.gitignore'), 'docs2/\n')
   const s2 = newSession()
-  const r2 = attachPath(s2, tmp, 'docs2')
+  const r2 = await attachPath(s2, tmp, 'docs2')
   assert.ok(!r2.ok, 'folder yang di-gitignore harus kosong')
 })
 
-test('attachPath: gambar → sinyal image (bukan konteks), file hilang error', () => {
+test('attachPath: gambar → sinyal image (bukan konteks), file hilang error', async () => {
   const s = newSession()
-  const img = attachPath(s, tmp, 'foto.png')
+  const img = await attachPath(s, tmp, 'foto.png')
   assert.ok(img.ok)
   assert.ok(img.image, 'harus ada sinyal image')
   assert.equal(img.image!.path, 'foto.png')
@@ -72,42 +73,42 @@ test('attachPath: gambar → sinyal image (bukan konteks), file hilang error', (
   assert.ok(img.image!.part.image_url.url.startsWith('data:image/png;base64,'))
   assert.equal(s.attached.length, 0, 'gambar tidak masuk attached')
 
-  const missing = attachPath(s, tmp, 'tidak-ada.txt')
+  const missing = await attachPath(s, tmp, 'tidak-ada.txt')
   assert.ok(!missing.ok)
   assert.ok(missing.message.includes('Tidak ditemukan'))
 })
 
-test('attachPath: lampir ulang path sama → replace (tidak duplikat)', () => {
+test('attachPath: lampir ulang path sama → replace (tidak duplikat)', async () => {
   const s = newSession()
-  attachPath(s, tmp, 'visible.txt')
+  await attachPath(s, tmp, 'visible.txt')
   fs.writeFileSync(path.join(tmp, 'visible.txt'), 'isi baru\n')
-  attachPath(s, tmp, 'visible.txt')
+  await attachPath(s, tmp, 'visible.txt')
   assert.equal(s.attached.length, 1)
   assert.ok(s.attached[0].content.includes('isi baru'))
 })
 
-test('detachPath: per path & all', () => {
+test('detachPath: per path & all', async () => {
   const s = newSession()
-  attachPath(s, tmp, 'visible.txt')
-  const r = detachPath(s, tmp, 'visible.txt')
+  await attachPath(s, tmp, 'visible.txt')
+  const r = await detachPath(s, tmp, 'visible.txt')
   assert.ok(r.ok)
   assert.equal(s.attached.length, 0)
-  assert.ok(!detachPath(s, tmp, 'visible.txt').ok, 'detach ulang → tidak ada')
+  assert.ok(!(await detachPath(s, tmp, 'visible.txt')).ok, 'detach ulang → tidak ada')
 
-  attachPath(s, tmp, 'visible.txt')
+  await attachPath(s, tmp, 'visible.txt')
   s.docs.push({ url: 'https://x', title: 'x', content: 'c', added_at: new Date().toISOString() })
-  const all = detachPath(s, tmp, 'all')
+  const all = await await detachPath(s, tmp, 'all')
   assert.ok(all.ok)
   assert.equal(s.attached.length, 0)
   assert.equal(s.docs.length, 0)
 })
 
-test('normRel: ./ dan absolut dinormalisasi', () => {
+test('normRel: ./ dan absolut dinormalisasi', async () => {
   assert.equal(normRel(tmp, './visible.txt'), 'visible.txt')
   assert.equal(normRel(tmp, path.join(tmp, 'visible.txt')), 'visible.txt')
 })
 
-test('stripHtml + decodeEntities: tag dibuang, entity diterjemahkan', () => {
+test('stripHtml + decodeEntities: tag dibuang, entity diterjemahkan', async () => {
   const html = `<html><head><style>p{}</style><script>evil()</script></head>
 <body><!-- komentar --><h1>Judul</h1><p>Dua &amp; tiga &#39;kutip&#39; &#x27; lagi</p><br><p>Baris bawah</p></body></html>`
   const text = stripHtml(html)
@@ -119,7 +120,7 @@ test('stripHtml + decodeEntities: tag dibuang, entity diterjemahkan', () => {
   assert.ok(decodeEntities('&lt;x&gt;&nbsp;&mdash;') === '<x> —')
 })
 
-test('buildAttachmentContext: gabung file+doc, item terbaru diprioritaskan saat melebihi cap', () => {
+test('buildAttachmentContext: gabung file+doc, item terbaru diprioritaskan saat melebihi cap', async () => {
   const big = 'x'.repeat(25_000)
   const a: { path: string; content: string; added_at: string }[] = [
     { path: 'lama.txt', content: big, added_at: '2026-01-01T00:00:00Z' },
@@ -135,9 +136,9 @@ test('buildAttachmentContext: gabung file+doc, item terbaru diprioritaskan saat 
   assert.equal(block!.dropped, 1)
 })
 
-test('syncContextMessage: idempotent — dua kali panggilan tetap satu message', () => {
+test('syncContextMessage: idempotent — dua kali panggilan tetap satu message', async () => {
   const s = newSession()
-  attachPath(s, tmp, 'visible.txt')
+  await attachPath(s, tmp, 'visible.txt')
   syncContextMessage(s)
   const len1 = s.messages.length
   syncContextMessage(s)
@@ -146,8 +147,8 @@ test('syncContextMessage: idempotent — dua kali panggilan tetap satu message',
   assert.ok(typeof s.messages[1].content === 'string' && s.messages[1].content.startsWith(CONTEXT_MESSAGE_PREFIX))
 
   // Roundtrip save/load lalu sync lagi — tetap satu.
-  s.save()
-  const loaded = AgentSession.load(tmp, s.id)!
+  await s.save()
+  const loaded = (await AgentSession.load(tmp, s.id))!
   syncContextMessage(loaded)
   assert.equal(
     loaded.messages.filter((m) => typeof m.content === 'string' && m.content.startsWith(CONTEXT_MESSAGE_PREFIX)).length,
@@ -155,11 +156,11 @@ test('syncContextMessage: idempotent — dua kali panggilan tetap satu message',
   )
 })
 
-test('syncContextMessage: tanpa lampiran → message konteks dihapus', () => {
+test('syncContextMessage: tanpa lampiran → message konteks dihapus', async () => {
   const s = newSession()
-  attachPath(s, tmp, 'visible.txt')
+  await attachPath(s, tmp, 'visible.txt')
   syncContextMessage(s)
-  detachPath(s, tmp, 'all')
+  await detachPath(s, tmp, 'all')
   syncContextMessage(s)
   assert.equal(s.messages.length, 1, 'konteks harus terhapus')
 })

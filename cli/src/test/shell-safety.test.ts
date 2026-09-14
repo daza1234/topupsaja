@@ -1,6 +1,7 @@
+import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyBash } from '../agent/shell-safety.js'
+import { classifyBash } from '@topupsaja/core/agent/shell-safety.js'
 
 // ── safe ──
 test('classifyBash: safe tunggal, env prefix, compound safe, pipe aman', () => {

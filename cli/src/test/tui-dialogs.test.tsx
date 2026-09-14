@@ -1,11 +1,12 @@
+import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import React from 'react'
 import { render } from 'ink-testing-library'
 import { AskUserDialog } from '../tui/components/AskUserDialog.js'
 import { ApprovalDialog } from '../tui/components/ApprovalDialog.js'
-import type { AskUserRequest, AskUserAnswer } from '../agent/runtime.js'
-import type { ApprovalRequest, ApprovalAnswer } from '../agent/permission.js'
+import type { AskUserRequest, AskUserAnswer } from '@topupsaja/core/agent/runtime.js'
+import type { ApprovalRequest, ApprovalAnswer } from '@topupsaja/core/agent/permission.js'
 
 const OPTS = [{ label: 'A' }, { label: 'B' }, { label: 'C' }]
 

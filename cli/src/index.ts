@@ -1,20 +1,21 @@
 #!/usr/bin/env node
+import './bootstrap.js'
 import path from 'node:path'
 import { Command } from 'commander'
 import pc from 'picocolors'
-import { ApiError, getCredits, listModels, verifyKey } from './api.js'
-import { getApiKey, getBaseUrl, loadConfig, saveConfig, PermissionMode } from './config.js'
+import { ApiError, getCredits, listModels, verifyKey } from '@topupsaja/core/api.js'
+import { getApiKey, getBaseUrl, loadConfig, saveConfig, PermissionMode } from '@topupsaja/core/config.js'
 import { fmtNum } from './ui/format.js'
 import { ask, askHidden, closeRl } from './io.js'
-import { AgentSession, listSessions, lastSessionId } from './session/store.js'
-import { buildSystemPrompt, resolveModeArg, ALL_MODES, discoverCustomModes } from './agent/modes.js'
-import type { CustomMode } from './agent/modes.js'
-import { PermissionManager } from './agent/permission.js'
-import { AskUserManager, AgentEmitter, AgentRuntime } from './agent/runtime.js'
-import { loadPermissionRules } from './agent/rules.js'
-import { listProjectFiles } from './session/context.js'
+import { AgentSession, listSessions, lastSessionId } from '@topupsaja/core/session/store.js'
+import { buildSystemPrompt, resolveModeArg, ALL_MODES, discoverCustomModes } from '@topupsaja/core/agent/modes.js'
+import type { CustomMode } from '@topupsaja/core/agent/modes.js'
+import { PermissionManager } from '@topupsaja/core/agent/permission.js'
+import { AskUserManager, AgentEmitter, AgentRuntime } from '@topupsaja/core/agent/runtime.js'
+import { loadPermissionRules } from '@topupsaja/core/agent/rules.js'
+import { listProjectFiles } from '@topupsaja/core/session/context.js'
 import { runOneShot, runPlainRepl } from './ui/plain.js'
-import { fetchModels } from './api.js'
+import { fetchModels } from '@topupsaja/core/api.js'
 
 const program = new Command()
 
@@ -23,8 +24,8 @@ program
   .description('CLI coding agent TopUpSaja — terminal agent TUI dengan prepaid credit.')
   .version('0.8.0')
 
-function requireKey(): string {
-  const key = getApiKey()
+async function requireKey(): Promise<string> {
+  const key = await getApiKey()
   if (!key) {
     console.log(pc.yellow('API key belum diset. Jalankan `topupsaja login` dulu,'))
     console.log(pc.yellow('atau set env TOPUPSAJA_API_KEY.'))
@@ -59,7 +60,7 @@ program
       if (opts.url) patch.base_url = opts.url.replace(/\/+$/, '')
       saveConfig(patch)
       console.log(pc.green(`✓ Key valid (${v.email}) · saldo ${fmtNum(v.balance)} credit.`))
-      console.log(pc.dim(`Base URL: ${getBaseUrl()}`))
+      console.log(pc.dim(`Base URL: ${await getBaseUrl()}`))
     } catch (e) {
       printApiError(e)
     }
@@ -71,7 +72,7 @@ program
   .command('balance')
   .description('Cek saldo credit + usage hari ini')
   .action(async () => {
-    requireKey()
+    await requireKey()
     try {
       const c = await getCredits()
       console.log()
@@ -95,7 +96,7 @@ program
   .command('models')
   .description('Daftar model aktif + harga credit')
   .action(async () => {
-    requireKey()
+    await requireKey()
     try {
       const { data } = await listModels()
       console.log()
@@ -117,7 +118,7 @@ program
   .argument('<id>', 'id model (lihat topupsaja models)')
   .description('Set model default untuk sesi agent')
   .action(async (id: string) => {
-    requireKey()
+    await requireKey()
     try {
       const models = await fetchModels()
       const found = models.find((m) => m.id === id || m.id === `ts/${id}`)
@@ -159,13 +160,13 @@ program
         outputFormat?: string
       }
     ) => {
-      requireKey()
+      await requireKey()
       if (opts.plain) process.env.TOPUPSAJA_PLAIN = '1'
       const cwd = process.cwd()
-      const cfg = loadConfig()
+      const cfg = await loadConfig()
 
       // ── Mode & permission ──
-      const customModes: CustomMode[] = discoverCustomModes(cwd)
+      const customModes: CustomMode[] = await discoverCustomModes(cwd)
       let mode: string = 'code'
       if (opts.mode) {
         const resolved = resolveModeArg(opts.mode, customModes)
@@ -187,7 +188,7 @@ program
       let permMode: PermissionMode = permOpt ?? cfg.permission_mode ?? 'ask'
 
       // ── Aturan permission granular (global + project) ──
-      const { rules, errors } = loadPermissionRules(cwd)
+      const { rules, errors } = await loadPermissionRules(cwd)
       for (const e of errors) console.log(pc.yellow(`⚠ aturan permission: ${e}`))
 
       // ── Model + daftar model (validasi key sekaligus) ──
@@ -215,7 +216,7 @@ program
           )
           if (!picked) process.exit(1)
           model = picked
-          saveConfig({ model })
+          await saveConfig({ model })
         } else {
           console.log(pc.red("✗ Model belum diset. Jalankan `topupsaja model <id>` dulu (non-TTY tidak bisa picker)."))
           process.exit(1)
@@ -225,7 +226,7 @@ program
       // ── Session: baru / --continue / --resume ──
       let session: AgentSession | null = null
       if (opts.resume || opts.continue) {
-        const id = opts.resume ? null : lastSessionId(cwd)
+        const id = opts.resume ? null : await lastSessionId(cwd)
         let chosen: string | null = id
         if (opts.resume) {
           if (!isTty()) {
@@ -233,7 +234,7 @@ program
             process.exit(1)
           }
           const { pickFromList } = await import('./tui/components/Picker.js')
-          const metas = listSessions(cwd)
+          const metas = await listSessions(cwd)
           if (metas.length === 0) {
             console.log(pc.yellow('Tidak ada sesi tersimpan untuk folder ini — mulai sesi baru.'))
           } else {
@@ -248,7 +249,7 @@ program
           }
         }
         if (chosen) {
-          session = AgentSession.load(cwd, chosen)
+          session = await AgentSession.load(cwd, chosen)
           if (!session) {
             console.log(pc.yellow(`⚠ Sesi ${chosen} gagal dimuat — mulai sesi baru.`))
             session = null
@@ -256,7 +257,7 @@ program
         }
       }
       if (!session) {
-        session = AgentSession.create(cwd, model, buildSystemPrompt(cwd, mode, customModes))
+        session = AgentSession.create(cwd, model, await buildSystemPrompt(cwd, mode, customModes))
         session.permissionMode = permMode
       }
       // Flag menang atas nilai tersimpan.
@@ -266,7 +267,7 @@ program
       else permMode = session.permissionMode
       if (session.mode !== mode) mode = session.mode
       if (!session.messages.some((m) => m.role === 'system')) {
-        session.messages.unshift({ role: 'system', content: buildSystemPrompt(cwd, mode, customModes) })
+        session.messages.unshift({ role: 'system', content: await buildSystemPrompt(cwd, mode, customModes) })
       }
 
       // ── Runtime headless ──
@@ -288,15 +289,15 @@ program
 
       // ── MCP stdio (bila ada config mcp.json) ──
       try {
-        const { connectMcpServers } = await import('./mcp/client.js')
+        const { connectMcpServers } = await import('@topupsaja/core/mcp/client.js')
         const conns = await connectMcpServers(cwd, (m) => console.log(pc.dim(m)))
         rt.mcp = conns
       } catch {
         /* tanpa MCP — lanjut */
       }
 
-      const saveAndExit = (code = 0) => {
-        session!.save()
+      const saveAndExit = async (code = 0) => {
+        await session!.save()
         process.exit(code)
       }
       process.on('SIGINT', () => saveAndExit(0))
@@ -314,13 +315,13 @@ program
         try {
           const { runPrint } = await import('./ui/plain.js')
           const out = await runPrint(rt, prompt, opts.outputFormat === 'json' ? 'json' : 'text')
-          session.save()
+          await session.save()
           if (opts.outputFormat === 'json') console.log(JSON.stringify(out))
           else if (out.result.trim()) console.log(out.result.trim())
           process.exit(0)
         } catch (e) {
           console.error(pc.red(`✗ ${(e as Error).message}`))
-          saveAndExit(1)
+          await saveAndExit(1)
         }
         return
       }
@@ -340,7 +341,7 @@ program
       try {
         if (isTty()) {
           const { startTui } = await import('./tui/main.js')
-          const files = listProjectFiles(cwd)
+          const files = await listProjectFiles(cwd)
           await startTui(rt, files)
           saveAndExit(0)
         } else {

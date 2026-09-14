@@ -1,4 +1,4 @@
-import { EventEmitter } from 'node:events'
+import { resolve } from 'pathe'
 import type { ModelInfo } from '../api.js'
 import type { TodoItem } from '../storage/todo.js'
 import type { AgentSession } from '../session/store.js'
@@ -72,17 +72,21 @@ export type AgentEventMap = {
   error: [message: string]
 }
 
-/** EventEmitter typed — jembatan headless loop → UI (Ink / teks polos). */
+/** Emitter typed mini (pengganti node:events agar core jalan di webview). */
 export class AgentEmitter {
-  private ee = new EventEmitter()
+  private listeners = new Map<string, Set<(...args: unknown[]) => void>>()
 
   on<K extends keyof AgentEventMap>(event: K, fn: (...args: AgentEventMap[K]) => void): () => void {
-    this.ee.on(event, fn)
-    return () => this.ee.off(event, fn)
+    let set = this.listeners.get(event)
+    if (!set) this.listeners.set(event, (set = new Set()))
+    set.add(fn as (...args: unknown[]) => void)
+    return () => set.delete(fn as (...args: unknown[]) => void)
   }
 
   emit<K extends keyof AgentEventMap>(event: K, ...args: AgentEventMap[K]): void {
-    this.ee.emit(event, ...args)
+    const set = this.listeners.get(event)
+    if (!set) return
+    for (const fn of [...set]) fn(...args)
   }
 }
 

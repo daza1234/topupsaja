@@ -1,7 +1,6 @@
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
-import { parseFrontmatter } from '../commands.js'
+import { join } from 'pathe'
+import { getHost } from '../host.js'
+import { parseFrontmatter } from '../frontmatter.js'
 import { loadAgentsMd, loadGlobalAgentsMd } from '../session/context.js'
 
 export type Mode = 'code' | 'architect' | 'ask' | 'test'
@@ -15,11 +14,10 @@ export interface CustomMode {
   readOnly: boolean
 }
 
-function detectProjectContext(cwd: string): string {
+async function detectProjectContext(cwd: string): Promise<string> {
   const parts: string[] = []
   try {
-    const entries = fs
-      .readdirSync(cwd, { withFileTypes: true })
+    const entries = (await getHost().fs.readdir(cwd, { withFileTypes: true }))
       .filter((e) => !e.name.startsWith('.'))
       .slice(0, 30)
       .map((e) => (e.isDirectory() ? e.name + '/' : e.name))
@@ -39,7 +37,10 @@ function detectProjectContext(cwd: string): string {
     ['Gemfile', 'Ruby'],
     ['pom.xml', 'Java'],
   ]
-  const langs = markers.filter(([f]) => fs.existsSync(path.join(cwd, f))).map(([, l]) => l)
+  const langs: string[] = []
+  for (const [f, l] of markers) {
+    if (await getHost().fs.exists(join(cwd, f))) langs.push(l)
+  }
   if (langs.length) parts.push(`Deteksi bahasa/framework: ${[...new Set(langs)].join(', ')}`)
 
   return parts.join('\n')
@@ -63,16 +64,16 @@ export const ALL_MODES: Mode[] = ['code', 'architect', 'ask', 'test']
  *   ~/.topupsaja/modes/*.md (global)
  * Nama file (tanpa .md, lowercase) = mode id. Frontmatter: description, read_only (bool).
  */
-export function discoverCustomModes(cwd: string): CustomMode[] {
+export async function discoverCustomModes(cwd: string): Promise<CustomMode[]> {
   const dirs = [
-    path.join(cwd, '.tsa', 'modes'),
-    path.join(os.homedir(), '.topupsaja', 'modes'),
+    join(cwd, '.tsa', 'modes'),
+    join(getHost().homedir(), '.topupsaja', 'modes'),
   ]
   const map = new Map<string, CustomMode>()
   for (const dir of dirs) {
     let files: string[]
     try {
-      files = fs.readdirSync(dir)
+      files = await getHost().fs.readdir(dir)
     } catch {
       continue
     }
@@ -81,7 +82,7 @@ export function discoverCustomModes(cwd: string): CustomMode[] {
       const name = f.slice(0, -3).trim().toLowerCase()
       if (!name) continue
       try {
-        const raw = fs.readFileSync(path.join(dir, f), 'utf8')
+        const raw = await getHost().fs.readFile(join(dir, f), 'utf8')
         const { meta, body } = parseFrontmatter(raw)
         if (!map.has(name)) {
           map.set(name, {
@@ -126,9 +127,9 @@ export const MODE_NOTICE: Record<Mode, string> = {
   test: 'Mode TEST — fokus menulis & menjalankan unit test.',
 }
 
-function detectTestRunner(cwd: string): string {
+async function detectTestRunner(cwd: string): Promise<string> {
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8')) as {
+    const pkg = JSON.parse(await getHost().fs.readFile(join(cwd, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>
       devDependencies?: Record<string, string>
       dependencies?: Record<string, string>
@@ -161,7 +162,7 @@ function customModeSection(m: CustomMode): string {
   return `\n## MODE ${m.name.toUpperCase()} AKTIF (mode kustom${readOnly ? ', read-only' : ''})\n${m.body.trim()}${readOnly}\n`
 }
 
-function modeSection(mode: Mode, cwd: string): string {
+async function modeSection(mode: Mode, cwd: string): Promise<string> {
   switch (mode) {
     case 'code':
       return ''
@@ -183,22 +184,22 @@ Kamu sedang dalam mode ASK (read-only). ATURAN KERAS:
       return `
 ## MODE TEST AKTIF
 Kamu berfokus membuat dan menjalankan unit test. ATURAN:
-- Deteksi test runner project (${detectTestRunner(cwd)}) — pakai itu untuk menjalankan test.
+- Deteksi test runner project (${await detectTestRunner(cwd)}) — pakai itu untuk menjalankan test.
 - Tulis test baru dengan write_file, jalankan via bash hanya untuk test command.
 - Perubahan kode produksi minimal: hanya bila perlu memperbaiki bug yang terbukti oleh test — jelaskan alasannya.
 - Akhiri jawaban dengan ringkasan: test yang ditambah/dijalankan, hasilnya (pass/fail), dan sisa yang gagal.`
   }
 }
 
-export function buildSystemPrompt(cwd: string, mode: string, custom: CustomMode[] = []): string {
+export async function buildSystemPrompt(cwd: string, mode: string, custom: CustomMode[] = []): Promise<string> {
   const customMode = ALL_MODES.includes(mode as Mode) ? null : (custom.find((c) => c.name === mode) ?? null)
   const section = customMode
     ? customModeSection(customMode)
     : ALL_MODES.includes(mode as Mode)
-      ? modeSection(mode as Mode, cwd)
+      ? await modeSection(mode as Mode, cwd)
       : ''
-  const globalAgents = loadGlobalAgentsMd()
-  const agents = loadAgentsMd(cwd)
+  const globalAgents = await loadGlobalAgentsMd()
+  const agents = await loadAgentsMd(cwd)
   const memorySections =
     (globalAgents
       ? `\n## AGENTS.md GLOBAL (~/.topupsaja/AGENTS.md — berlaku untuk semua project)\n\n${globalAgents}\n`
@@ -210,7 +211,7 @@ export function buildSystemPrompt(cwd: string, mode: string, custom: CustomMode[
 
 Kamu berjalan di terminal user, di direktori: ${cwd}
 
-${detectProjectContext(cwd)}
+${await detectProjectContext(cwd)}
 
 ## Aturan kerja
 - Balas dalam bahasa yang dipakai user. Default Bahasa Indonesia bila ragu.

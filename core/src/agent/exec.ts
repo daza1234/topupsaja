@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process'
-import fs from 'node:fs'
-import path from 'node:path'
+import { dirname, extname, join, relative, resolve } from 'pathe'
+import { getHost } from '../host.js'
+import type { HostDirent } from '../host.js'
 import pc from 'picocolors'
 import { TodoStore } from '../storage/todo.js'
 import { loadIgnore, isIgnored, isImagePath, encodeImagePart } from '../session/context.js'
@@ -32,22 +32,22 @@ function ok(output: string): ToolResult {
 }
 
 function resolveSafe(p: string): string {
-  return path.resolve(process.cwd(), p)
+  return resolve(getHost().cwd(), p)
 }
 
 // ── read_file ──
-export function readFile(args: { path: string; offset?: number; limit?: number }): ToolResult {
+export async function readFile(args: { path: string; offset?: number; limit?: number }): Promise<ToolResult> {
   try {
     const p = resolveSafe(args.path)
-    const stat = fs.statSync(p)
+    const stat = await getHost().fs.stat(p)
     if (stat.isDirectory()) return err(`'${args.path}' adalah direktori.`)
     if (isImagePath(args.path)) {
-      const part = encodeImagePart(p)
+      const part = await encodeImagePart(p)
       if (!part) return err(`Gambar '${args.path}' >5MB — terlalu besar untuk konteks.`)
       const kb = Math.max(1, Math.round(stat.size / 1024))
       return { ok: true, output: `[gambar] ${args.path} (${kb} KB) — terlampir ke konteks.`, image: part }
     }
-    const lines = fs.readFileSync(p, 'utf8').split('\n')
+    const lines = (await getHost().fs.readFile(p, 'utf8')).split('\n')
     const start = Math.max(Number(args.offset) || 1, 1)
     const limit = Number(args.limit) || 2000
     const slice = lines.slice(start - 1, start - 1 + limit)
@@ -59,11 +59,11 @@ export function readFile(args: { path: string; offset?: number; limit?: number }
 }
 
 // ── write_file ──
-export function writeFile(args: { path: string; content: string }): ToolResult {
+export async function writeFile(args: { path: string; content: string }): Promise<ToolResult> {
   try {
     const p = resolveSafe(args.path)
-    fs.mkdirSync(path.dirname(p), { recursive: true })
-    fs.writeFileSync(p, args.content, 'utf8')
+    await getHost().fs.mkdir(dirname(p), { recursive: true })
+    await getHost().fs.writeFile(p, args.content, 'utf8')
     const lines = args.content.split('\n').length
     return ok(`File '${args.path}' ditulis (${lines} baris).`)
   } catch (e) {
@@ -72,10 +72,10 @@ export function writeFile(args: { path: string; content: string }): ToolResult {
 }
 
 // ── edit_file ──
-export function editFile(args: { path: string; old_string: string; new_string: string }): ToolResult {
+export async function editFile(args: { path: string; old_string: string; new_string: string }): Promise<ToolResult> {
   try {
     const p = resolveSafe(args.path)
-    const content = fs.readFileSync(p, 'utf8')
+    const content = await getHost().fs.readFile(p, 'utf8')
     if (args.old_string === args.new_string) return err('old_string dan new_string identik.')
     if (!content.includes(args.old_string)) {
       return err(`old_string tidak ditemukan di '${args.path}'. Pastikan teks exact match (termasuk spasi/indentasi).`)
@@ -85,7 +85,7 @@ export function editFile(args: { path: string; old_string: string; new_string: s
     if (second !== -1) {
       return err(`old_string muncul ${content.split(args.old_string).length - 1}x di '${args.path}' — tidak unik. Perluas konteks old_string agar unik.`)
     }
-    fs.writeFileSync(p, content.replace(args.old_string, args.new_string), 'utf8')
+    await getHost().fs.writeFile(p, content.replace(args.old_string, args.new_string), 'utf8')
     return ok(`'${args.path}' diedit.`)
   } catch (e) {
     return err(`Gagal mengedit '${args.path}': ${(e as Error).message}`)
@@ -139,7 +139,7 @@ export async function editFilePartial(
 ): Promise<ToolResult> {
   try {
     const p = resolveSafe(args.path)
-    const content = fs.readFileSync(p, 'utf8')
+    const content = await getHost().fs.readFile(p, 'utf8')
     if (args.old_string === args.new_string) return err('old_string dan new_string identik.')
     if (!content.includes(args.old_string)) {
       return err(`old_string tidak ditemukan di '${args.path}'. Pastikan teks exact match (termasuk spasi/indentasi).`)
@@ -154,9 +154,9 @@ export async function editFilePartial(
       return err('Tidak ada perubahan efektif dari hunk terpilih (hasil == teks lama).')
     }
     const rel = relPath(rt.cwd, args.path)
-    const skipped = stagePreState(rt, rel)
+    const skipped = await stagePreState(rt, rel)
     if (skipped) rt.emitter.emit('notice', `File > 1MB — checkpoint dilewati: ${skipped}`)
-    fs.writeFileSync(p, content.replace(args.old_string, merged), 'utf8')
+    await getHost().fs.writeFile(p, content.replace(args.old_string, merged), 'utf8')
     markTouched(rt, rel)
     await formatAfterWrite(rt, args.path)
     return ok(`'${args.path}' diedit parsial (hunk: ${hunks.join(', ')}).`)
@@ -168,9 +168,9 @@ export async function editFilePartial(
 // ── bash ──
 export function runBash(args: { command: string }): Promise<ToolResult> {
   return new Promise((resolve) => {
-    const child = spawn('bash', ['-c', args.command], {
-      cwd: process.cwd(),
-      env: process.env,
+    const child = getHost().exec.spawn('bash', ['-c', args.command], {
+      cwd: getHost().cwd(),
+      env: getHost().env,
     })
     let out = ''
     let timedOut = false
@@ -224,20 +224,20 @@ function globToRegex(pattern: string): RegExp {
   return new RegExp(`^${re}$`)
 }
 
-function walkFiles(dir: string, base: string, out: string[], ig?: ReturnType<typeof loadIgnore>): void {
-  let entries: fs.Dirent[]
+async function walkFiles(dir: string, base: string, out: string[], ig?: Awaited<ReturnType<typeof loadIgnore>>): Promise<void> {
+  let entries: HostDirent[]
   try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
+    entries = await getHost().fs.readdir(dir, { withFileTypes: true })
   } catch {
     return
   }
   for (const e of entries) {
-    const full = path.join(dir, e.name)
-    const rel = path.relative(base, full)
+    const full = join(dir, e.name)
+    const rel = relative(base, full)
     if (e.isDirectory()) {
       if (SKIP_DIRS.has(e.name) || e.name.startsWith('.git')) continue
       if (ig && isIgnored(ig, rel)) continue
-      walkFiles(full, base, out, ig)
+      await walkFiles(full, base, out, ig)
     } else if (e.isFile()) {
       if (ig && isIgnored(ig, rel)) continue
       out.push(rel)
@@ -245,13 +245,13 @@ function walkFiles(dir: string, base: string, out: string[], ig?: ReturnType<typ
   }
 }
 
-export function glob(args: { pattern: string }): ToolResult {
+export async function glob(args: { pattern: string }): Promise<ToolResult> {
   try {
     const re = globToRegex(args.pattern)
-    const root = path.resolve(process.cwd(), '.')
-    const ig = loadIgnore(process.cwd())
+    const root = resolve(getHost().cwd(), '.')
+    const ig = await loadIgnore(getHost().cwd())
     const files: string[] = []
-    walkFiles(root, root, files, ig)
+    await walkFiles(root, root, files, ig)
     const matches = files.filter((f) => re.test(f)).sort()
     if (matches.length === 0) return ok(`Tidak ada file cocok dengan pattern '${args.pattern}'.`)
     return ok(`${matches.length} file:\n${matches.join('\n')}`)
@@ -261,7 +261,14 @@ export function glob(args: { pattern: string }): ToolResult {
 }
 
 // ── grep ──
-function isBinary(buf: Buffer): boolean {
+function b64Bytes(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
+}
+
+function isBinary(buf: Uint8Array): boolean {
   const sample = buf.subarray(0, 512)
   for (const b of sample) {
     if (b === 0) return true
@@ -270,55 +277,55 @@ function isBinary(buf: Buffer): boolean {
   return false
 }
 
-export function grepSync(args: { pattern: string; path?: string }): ToolResult {
+export async function grep(args: { pattern: string; path?: string }): Promise<ToolResult> {
   try {
     const re = new RegExp(args.pattern)
-    const start = args.path ? resolveSafe(args.path) : process.cwd()
-    const ig = loadIgnore(process.cwd())
+    const start = args.path ? resolveSafe(args.path) : getHost().cwd()
+    const ig = await loadIgnore(getHost().cwd())
     const results: string[] = []
     let fileCount = 0
 
-    const searchFile = (p: string) => {
-      let buf: Buffer
+    const searchFile = async (p: string) => {
+      let buf: Uint8Array
       try {
-        buf = fs.readFileSync(p)
+        buf = b64Bytes(await getHost().fs.readFile(p, 'base64'))
       } catch {
         return
       }
       if (isBinary(buf)) return
       fileCount++
-      const lines = buf.toString('utf8').split('\n')
+      const lines = new TextDecoder().decode(buf).split('\n')
       for (let i = 0; i < lines.length; i++) {
         if (re.test(lines[i])) {
-          results.push(`${path.relative(process.cwd(), p)}:${i + 1}: ${lines[i].trim().slice(0, 200)}`)
+          results.push(`${relative(getHost().cwd(), p)}:${i + 1}: ${lines[i].trim().slice(0, 200)}`)
           if (results.length >= 200) return
         }
       }
     }
 
-    const search = (p: string) => {
+    const search = async (p: string): Promise<void> => {
       if (results.length >= 200) return
-      const stat = fs.statSync(p)
+      const stat = await getHost().fs.stat(p)
       if (stat.isFile()) {
-        searchFile(p)
+        await searchFile(p)
         return
       }
-      let entries: fs.Dirent[]
+      let entries: HostDirent[]
       try {
-        entries = fs.readdirSync(p, { withFileTypes: true })
+        entries = await getHost().fs.readdir(p, { withFileTypes: true })
       } catch {
         return
       }
       for (const e of entries) {
         if (e.isDirectory() && (SKIP_DIRS.has(e.name) || e.name.startsWith('.'))) continue
-        const rel = path.relative(process.cwd(), path.join(p, e.name))
+        const rel = relative(getHost().cwd(), join(p, e.name))
         if (ig && isIgnored(ig, rel)) continue
-        search(path.join(p, e.name))
+        await search(join(p, e.name))
         if (results.length >= 200) return
       }
     }
 
-    search(start)
+    await search(start)
     if (results.length === 0) {
       return ok(`Tidak ada hasil untuk pattern '${args.pattern}' (${fileCount} file dipindai).`)
     }
@@ -364,32 +371,32 @@ const SYMBOL_PATTERNS: Record<string, RegExp[]> = (() => {
 
 const SYMBOL_MAX_RESULTS = 50
 
-export function findSymbol(args: { query: string; path?: string }): ToolResult {
+export async function findSymbol(args: { query: string; path?: string }): Promise<ToolResult> {
   const query = String(args.query ?? '').trim()
   if (query.length < 2) return err('query minimal 2 karakter.')
   const needle = query.toLowerCase()
 
   try {
-    const start = args.path ? resolveSafe(args.path) : process.cwd()
-    const ig = loadIgnore(process.cwd())
+    const start = args.path ? resolveSafe(args.path) : getHost().cwd()
+    const ig = await loadIgnore(getHost().cwd())
     const results: string[] = []
     let fileCount = 0
     let truncated = false
 
-    const searchFile = (p: string) => {
-      const ext = path.extname(p).toLowerCase()
+    const searchFile = async (p: string) => {
+      const ext = extname(p).toLowerCase()
       const patterns = SYMBOL_PATTERNS[ext]
       if (!patterns) return
-      let buf: Buffer
+      let buf: Uint8Array
       try {
-        buf = fs.readFileSync(p)
+        buf = b64Bytes(await getHost().fs.readFile(p, 'base64'))
       } catch {
         return
       }
       if (isBinary(buf)) return
       fileCount++
-      const rel = path.relative(process.cwd(), p)
-      const lines = buf.toString('utf8').split('\n')
+      const rel = relative(getHost().cwd(), p)
+      const lines = new TextDecoder().decode(buf).split('\n')
       for (let i = 0; i < lines.length; i++) {
         for (const re of patterns) {
           const m = re.exec(lines[i])
@@ -405,29 +412,29 @@ export function findSymbol(args: { query: string; path?: string }): ToolResult {
       }
     }
 
-    const search = (p: string) => {
+    const search = async (p: string): Promise<void> => {
       if (truncated) return
-      const stat = fs.statSync(p)
+      const stat = await getHost().fs.stat(p)
       if (stat.isFile()) {
-        searchFile(p)
+        await searchFile(p)
         return
       }
-      let entries: fs.Dirent[]
+      let entries: HostDirent[]
       try {
-        entries = fs.readdirSync(p, { withFileTypes: true })
+        entries = await getHost().fs.readdir(p, { withFileTypes: true })
       } catch {
         return
       }
       for (const e of entries) {
         if (e.isDirectory() && (SKIP_DIRS.has(e.name) || e.name.startsWith('.'))) continue
-        const rel = path.relative(process.cwd(), path.join(p, e.name))
+        const rel = relative(getHost().cwd(), join(p, e.name))
         if (ig && isIgnored(ig, rel)) continue
-        search(path.join(p, e.name))
+        await search(join(p, e.name))
         if (truncated) return
       }
     }
 
-    search(start)
+    await search(start)
     if (results.length === 0) {
       return ok(`Tidak ada definisi untuk '${query}' (${fileCount} file dipindai).`)
     }
@@ -456,10 +463,10 @@ export function runHook(
   cwd: string
 ): Promise<ToolResult> {
   return new Promise((resolve) => {
-    const child = spawn('bash', ['-c', command], {
+    const child = getHost().exec.spawn('bash', ['-c', command], {
       cwd,
       env: {
-        ...process.env,
+        ...getHost().env,
         TSA_TOOL: tool,
         TSA_TOOL_INPUT: JSON.stringify(args).slice(0, 100_000),
         TSA_CWD: cwd,
@@ -490,10 +497,10 @@ const FORMATTER_TIMEOUT_MS = 15_000
  * Murni terhadap `command` — pemanggil membaca config (mudah dites).
  */
 export function runFormatter(command: string, cwd: string, file: string): Promise<ToolResult> {
-  const abs = path.resolve(cwd, file)
+  const abs = resolve(cwd, file)
   const cmd = command.replaceAll('{file}', abs)
   return new Promise((resolve) => {
-    const child = spawn('bash', ['-c', cmd], { cwd, env: process.env })
+    const child = getHost().exec.spawn('bash', ['-c', cmd], { cwd, env: getHost().env })
     let out = ''
     let timedOut = false
     const timer = setTimeout(() => {
@@ -517,7 +524,7 @@ export function runFormatter(command: string, cwd: string, file: string): Promis
 
 /** Bila hooks.format_command diset: jalankan formatter; gagal → notice (file tetap tersimpan). */
 async function formatAfterWrite(rt: AgentRuntime, file: string): Promise<void> {
-  const cmd = loadConfig().hooks?.format_command?.trim()
+  const cmd = (await loadConfig()).hooks?.format_command?.trim()
   if (!cmd) return
   const fmt = await runFormatter(cmd, rt.cwd, file)
   if (!fmt.ok) rt.emitter.emit('notice', `format gagal: ${fmt.output.slice(0, 200)}`)
@@ -532,7 +539,7 @@ export async function executeTool(
   const rt = deps.rt
   switch (name) {
     case 'read_file': {
-      const r = readFile(args as { path: string; offset?: number; limit?: number })
+      const r = await readFile(args as { path: string; offset?: number; limit?: number })
       if (r.ok && r.image) {
         const model = rt.models.find((m) => m.id === rt.session.model)
         if (model?.supports_vision === false) {
@@ -545,18 +552,18 @@ export async function executeTool(
     }
     case 'write_file': {
       const rel = relPath(rt.cwd, String(args.path))
-      const skipped = stagePreState(rt, rel)
+      const skipped = await stagePreState(rt, rel)
       if (skipped) rt.emitter.emit('notice', `File > 1MB — checkpoint dilewati: ${skipped}`)
       // Diff pasca-edit untuk auto-edit/yolo (di ask, preview approval sudah menunjukkan diff).
       let before: string | null = null
       if (rt.permissions.mode !== 'ask') {
         try {
-          before = fs.readFileSync(resolveSafe(String(args.path)), 'utf8')
+          before = await getHost().fs.readFile(resolveSafe(String(args.path)), 'utf8')
         } catch {
           before = null
         }
       }
-      const r = writeFile(args as { path: string; content: string })
+      const r = await writeFile(args as { path: string; content: string })
       if (r.ok) {
         markTouched(rt, rel)
         await formatAfterWrite(rt, String(args.path))
@@ -569,9 +576,9 @@ export async function executeTool(
     }
     case 'edit_file': {
       const rel = relPath(rt.cwd, String(args.path))
-      const skipped = stagePreState(rt, rel)
+      const skipped = await stagePreState(rt, rel)
       if (skipped) rt.emitter.emit('notice', `File > 1MB — checkpoint dilewati: ${skipped}`)
-      const r = editFile(args as { path: string; old_string: string; new_string: string })
+      const r = await editFile(args as { path: string; old_string: string; new_string: string })
       if (r.ok) {
         markTouched(rt, rel)
         await formatAfterWrite(rt, String(args.path))
@@ -589,7 +596,7 @@ export async function executeTool(
     case 'glob':
       return glob(args as { pattern: string })
     case 'grep':
-      return grepSync(args as { pattern: string; path?: string })
+      return grep(args as { pattern: string; path?: string })
     case 'find_symbol':
       return findSymbol(args as { query: string; path?: string })
     case 'todo_write':

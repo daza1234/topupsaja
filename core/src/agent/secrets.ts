@@ -1,5 +1,5 @@
-import os from 'node:os'
-import path from 'node:path'
+import { getHost } from '../host.js'
+import { join } from 'pathe'
 
 /**
  * Proteksi secret-path: file yang berisi kredensial tidak boleh terbaca
@@ -19,9 +19,9 @@ const SECRET_FRAGMENTS = [
 const ENV_TOKEN = /\.env([.\w]*)/i
 
 function expandHome(s: string): string {
-  if (s === '~') return os.homedir()
+  if (s === '~') return getHost().homedir()
   if (s.startsWith('~/') || s.startsWith('~\\')) {
-    return path.join(os.homedir(), s.slice(2))
+    return join(getHost().homedir(), s.slice(2))
   }
   return s
 }

@@ -1,6 +1,7 @@
+import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { splitHunks, applyHunks } from '../agent/hunks.js'
+import { splitHunks, applyHunks } from '@topupsaja/core/agent/hunks.js'
 
 test('splitHunks: diff 2 blok terpisah → 2 hunk bernomor urut', () => {
   const d = '- b\n+ X\n- e\n+ Y'

@@ -1,26 +1,26 @@
 import React, { useMemo, useState } from 'react'
 import { Box, Static, Text, useApp, useInput } from 'ink'
-import type { AgentRuntime } from '../agent/runtime.js'
-import { runTurn, setMode, setPermissionMode, startNewSession } from '../agent/loop.js'
-import { compactNow } from '../session/compaction.js'
-import { detachPath, addDoc, expandMentions } from '../session/context.js'
-import { buildSystemPrompt, resolveModeArg, discoverCustomModes, modeNotice, ALL_MODES, MODE_INFO } from '../agent/modes.js'
-import type { Mode } from '../agent/modes.js'
-import { AgentSession, listSessions } from '../session/store.js'
-import { fetchModels, getCredits, ApiError } from '../api.js'
-import { saveConfig } from '../config.js'
+import type { AgentRuntime } from '@topupsaja/core/agent/runtime.js'
+import { runTurn, setMode, setPermissionMode, startNewSession } from '@topupsaja/core/agent/loop.js'
+import { compactNow } from '@topupsaja/core/session/compaction.js'
+import { detachPath, addDoc, expandMentions } from '@topupsaja/core/session/context.js'
+import { buildSystemPrompt, resolveModeArg, discoverCustomModes, modeNotice, ALL_MODES, MODE_INFO } from '@topupsaja/core/agent/modes.js'
+import type { Mode } from '@topupsaja/core/agent/modes.js'
+import { AgentSession, listSessions } from '@topupsaja/core/session/store.js'
+import { fetchModels, getCredits, ApiError } from '@topupsaja/core/api.js'
+import { saveConfig } from '@topupsaja/core/config.js'
 import { discoverCommands, renderCommand } from '../commands.js'
-import { parseMcpToolName, mapPromptArgs, mcpPromptName } from '../mcp/client.js'
+import { parseMcpToolName, mapPromptArgs, mcpPromptName } from '@topupsaja/core/mcp/client.js'
 import { helpText as baseHelp, SHORT_HELP, settingsText, apiText, applyApiKey, addPathMessage, costText, mcpStatusText } from '../usage.js'
-import { undoLastTurn, diffCheckpoints } from '../agent/checkpoints.js'
-import { runLocal, formatRunOutput } from '../agent/commands-run.js'
-import { collectDiff, generateCommitMessage, performCommit } from '../agent/commit.js'
+import { undoLastTurn, diffCheckpoints } from '@topupsaja/core/agent/checkpoints.js'
+import { runLocal, formatRunOutput } from '@topupsaja/core/agent/commands-run.js'
+import { collectDiff, generateCommitMessage, performCommit } from '@topupsaja/core/agent/commit.js'
 import { useAgentBridge } from './hooks.js'
 import { BlockView } from './components/MessageList.js'
 import { ChatInput } from './components/ChatInput.js'
 import { ApprovalDialog } from './components/ApprovalDialog.js'
 import { AskUserDialog } from './components/AskUserDialog.js'
-import { rulesSummary, permissionLogLines } from '../agent/rules.js'
+import { rulesSummary, permissionLogLines } from '@topupsaja/core/agent/rules.js'
 import { FileFinder } from './components/FileFinder.js'
 import { StatusBar } from './components/StatusBar.js'
 import { TodoPanel } from './components/TodoPanel.js'
@@ -38,7 +38,7 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
   const [inject, setInject] = useState<{ text: string; nonce: number } | undefined>(undefined)
   const [confirm, setConfirm] = useState<{ question: string; onAnswer: (yes: boolean) => void } | null>(null)
   const customCommands = useMemo(() => discoverCommands(rt.cwd), [rt.cwd])
-  const customModes = useMemo(() => rt.customModes.length ? rt.customModes : discoverCustomModes(rt.cwd), [rt.cwd])
+  const customModes = rt.customModes
   const helpText = baseHelp(customCommands)
 
   useInput(
@@ -63,7 +63,7 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
   )
 
   function quit() {
-    rt.session.save()
+    void rt.session.save()
     exit()
   }
 
@@ -77,7 +77,7 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
 
     bridge.setBusy(true)
     try {
-      await runTurn(rt, expandMentions(raw, rt.cwd))
+      await runTurn(rt, await expandMentions(raw, rt.cwd))
     } catch (e) {
       bridge.addNotice(`error: ${(e as Error).message}`)
       bridge.setBusy(false)
@@ -85,7 +85,7 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
   }
 
   function switchMode(m: string) {
-    setMode(rt, m)
+    void setMode(rt, m)
     bridge.addNotice(modeNotice(m, rt.customModes))
   }
 
@@ -103,7 +103,7 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
     bridge.setBusy(true)
     try {
       const text = await conn.getPrompt(parsed!.tool, mapPromptArgs(def, argsString))
-      await runTurn(rt, expandMentions(text, rt.cwd))
+      await runTurn(rt, await expandMentions(text, rt.cwd))
     } catch (e) {
       bridge.addNotice(`error: ${(e as Error).message}`)
       bridge.setBusy(false)
@@ -124,7 +124,7 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
         return
       }
       case '/mode': {
-        rt.customModes = discoverCustomModes(rt.cwd)
+        rt.customModes = await discoverCustomModes(rt.cwd)
         const arg = line.slice(cmd.length).trim()
         if (arg) {
           const m = resolveModeArg(arg, rt.customModes)
@@ -143,7 +143,7 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
       case '/permissions': {
         const order = ['ask', 'auto-edit', 'yolo'] as const
         const next = order[(order.indexOf(rt.permissions.mode) + 1) % order.length]
-        setPermissionMode(rt, next)
+        await setPermissionMode(rt, next)
         const logLines = permissionLogLines(rt.session.permissionLog, 5)
         bridge.addNotice(
           `Permission mode: ${next} · ${rulesSummary(rt.permissions.rules)}` +
@@ -175,7 +175,7 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
       case '/api': {
         const arg = line.slice(cmd.length).trim()
         if (!arg) {
-          bridge.addNotice(apiText())
+          bridge.addNotice(await apiText())
           return
         }
         bridge.setBusy(true)
@@ -190,7 +190,7 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
           bridge.setOverlay({ kind: 'add' })
           return
         }
-        bridge.addNotice(addPathMessage(rt, arg))
+        bridge.addNotice(await addPathMessage(rt, arg))
         return
       }
       case '/drop': {
@@ -199,11 +199,11 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
           bridge.addNotice('Pemakaian: /drop <path|all>')
           return
         }
-        bridge.addNotice(detachPath(rt.session, rt.cwd, arg).message)
+        bridge.addNotice((await detachPath(rt.session, rt.cwd, arg)).message)
         return
       }
       case '/clear-files':
-        bridge.addNotice(detachPath(rt.session, rt.cwd, 'all').message)
+        bridge.addNotice((await detachPath(rt.session, rt.cwd, 'all')).message)
         return
       case '/add-doc': {
         const url = line.slice(cmd.length).trim()
@@ -226,7 +226,7 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
         const r = await runLocal(rt.cwd, runCmd)
         const formatted = formatRunOutput(runCmd, r)
         rt.session.messages.push({ role: 'user', content: formatted })
-        rt.session.save()
+        await rt.session.save()
         bridge.addNotice(formatted)
         return
       }
@@ -267,14 +267,14 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
       }
       case '/new':
       case '/new-task': {
-        const s = startNewSession(rt)
+        const s = await startNewSession(rt)
         bridge.clearBlocks()
         bridge.addNotice(`Sesi baru: ${s.id} (model ${s.model})`)
         return
       }
       case '/clear':
       case '/reset':
-        rt.session.reset(buildSystemPrompt(rt.cwd, rt.mode, customModes))
+        rt.session.reset(await buildSystemPrompt(rt.cwd, rt.mode, customModes ?? rt.customModes))
         bridge.clearBlocks()
         bridge.addNotice('Riwayat di-reset.')
         return
@@ -295,12 +295,12 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
         bridge.addNotice(helpText)
         return
       case '/undo': {
-        const restored = undoLastTurn(rt)
+        const restored = await undoLastTurn(rt)
         bridge.addNotice(restored.length ? `Di-undo: ${restored.join(', ')}` : 'Tidak ada turn yang bisa di-undo.')
         return
       }
       case '/diff':
-        bridge.addNotice(diffCheckpoints(rt))
+        bridge.addNotice(await diffCheckpoints(rt))
         return
       case '/mcp': {
         const arg = line.split(/\s+/).slice(1).join(' ').trim()
@@ -360,18 +360,21 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
         <ApprovalDialog
           req={bridge.approval}
           onAnswer={(approved, always, extra) => {
-            const warning = rt.permissions.answer(
-              bridge.approval!.id,
-              {
-                approved,
-                always,
-                alwaysPattern: extra?.alwaysPattern,
-                hunks: extra?.hunks,
-              },
-              bridge.approval!.tool,
-              bridge.approval!.args
-            )
-            if (warning) bridge.addNotice(warning)
+            void rt.permissions
+              .answer(
+                bridge.approval!.id,
+                {
+                  approved,
+                  always,
+                  alwaysPattern: extra?.alwaysPattern,
+                  hunks: extra?.hunks,
+                },
+                bridge.approval!.tool,
+                bridge.approval!.args
+              )
+              .then((warning) => {
+                if (warning) bridge.addNotice(warning)
+              })
           }}
         />
       )}
@@ -393,8 +396,8 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
           onCancel={() => bridge.setOverlay(null)}
           onSelect={(id) => {
             rt.session.model = id
-            rt.session.save()
-            saveConfig({ model: id })
+            void rt.session.save()
+            void saveConfig({ model: id })
             setModel(id)
             bridge.setOverlay(null)
             bridge.addNotice(`Model diganti ke ${id}`)
@@ -434,7 +437,7 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
           files={files}
           onPick={(p) => {
             bridge.setOverlay(null)
-            bridge.addNotice(addPathMessage(rt, p))
+            void addPathMessage(rt, p).then((m) => bridge.addNotice(m))
           }}
           onCancel={() => bridge.setOverlay(null)}
         />
@@ -445,18 +448,19 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
           rt={rt}
           onCancel={() => bridge.setOverlay(null)}
           onSelect={(id) => {
-            const s = AgentSession.load(rt.cwd, id)
-            bridge.setOverlay(null)
-            if (!s) {
-              bridge.addNotice(`Gagal memuat sesi ${id}.`)
-              return
-            }
-            rt.session = s
-            rt.mode = s.mode
-            rt.permissions.mode = s.permissionMode
-            setModel(s.model)
-            bridge.clearBlocks()
-            bridge.addNotice(`Sesi dimuat: ${s.title} (${s.messages.length} pesan)`)
+            void AgentSession.load(rt.cwd, id).then((s) => {
+              bridge.setOverlay(null)
+              if (!s) {
+                bridge.addNotice(`Gagal memuat sesi ${id}.`)
+                return
+              }
+              rt.session = s
+              rt.mode = s.mode
+              rt.permissions.mode = s.permissionMode
+              setModel(s.model)
+              bridge.clearBlocks()
+              bridge.addNotice(`Sesi dimuat: ${s.title} (${s.messages.length} pesan)`)
+            })
           }}
         />
       )}
@@ -542,6 +546,10 @@ function ModePicker({
 }
 
 function SettingsOverlay({ rt, onCancel }: { rt: AgentRuntime; onCancel: () => void }) {
+  const [lines, setLines] = useState<string[] | null>(null)
+  React.useEffect(() => {
+    settingsText(rt).then((t) => setLines(t.split('\n')))
+  }, [rt])
   useInput((input, key) => {
     if (key.escape) onCancel()
   })
@@ -550,11 +558,11 @@ function SettingsOverlay({ rt, onCancel }: { rt: AgentRuntime; onCancel: () => v
       <Text bold color="cyan">
         Settings (read-only)
       </Text>
-      {settingsText(rt)
-        .split('\n')
-        .map((l, i) => (
-          <Text key={i}>{l}</Text>
-        ))}
+      {lines ? (
+        lines.map((l, i) => <Text key={i}>{l}</Text>)
+      ) : (
+        <Text dimColor>memuat…</Text>
+      )}
       <Text dimColor> Esc tutup · ubah nilai via /model, /permissions, atau `topupsaja login` di terminal</Text>
     </Box>
   )
@@ -589,12 +597,19 @@ function SessionPicker({
   onSelect: (id: string) => void
   onCancel: () => void
 }) {
-  const sessions = listSessions(rt.cwd)
-  const items = sessions.map((s) => ({
-    value: s.id,
-    label: s.title,
-    hint: `${s.model} · ${new Date(s.updated).toLocaleString('id-ID')}`,
-  }))
+  const [items, setItems] = useState<{ value: string; label: string; hint: string }[] | null>(null)
+  React.useEffect(() => {
+    listSessions(rt.cwd).then((sessions) =>
+      setItems(
+        sessions.map((s) => ({
+          value: s.id,
+          label: s.title,
+          hint: `${s.model} · ${new Date(s.updated).toLocaleString('id-ID')}`,
+        }))
+      )
+    )
+  }, [rt])
+  if (items === null) return <Text dimColor>memuat sesi…</Text>
   if (items.length === 0) {
     return <Text color="yellow"> Tidak ada sesi tersimpan untuk folder ini.</Text>
   }

@@ -1,8 +1,9 @@
+import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { estimateTokens, messagesTokens, cheapestModel, contextWindowFor } from '../session/compaction.js'
-import type { ModelInfo } from '../api.js'
-import type { ChatMessage } from '../api.js'
+import { estimateTokens, messagesTokens, cheapestModel, contextWindowFor } from '@topupsaja/core/session/compaction.js'
+import type { ModelInfo } from '@topupsaja/core/api.js'
+import type { ChatMessage } from '@topupsaja/core/api.js'
 
 test('estimateTokens: chars/4 dibulatkan ke atas', () => {
   assert.equal(estimateTokens(0), 0)

@@ -1,20 +1,20 @@
 import pc from 'picocolors'
-import { ApiError, getCredits, fetchModels } from '../api.js'
+import { ApiError, getCredits, fetchModels } from '@topupsaja/core/api.js'
 import { ask, askYesNo, closeRl, getRl } from '../io.js'
-import { runTurn, setMode, setPermissionMode, startNewSession } from '../agent/loop.js'
-import { compactNow, messagesTokens, contextWindowFor } from '../session/compaction.js'
-import { detachPath, addDoc, expandMentions, loadAgentsMd } from '../session/context.js'
-import { buildSystemPrompt, resolveModeArg, discoverCustomModes, modeNotice, ALL_MODES, MODE_INFO } from '../agent/modes.js'
-import { AgentSession, listSessions } from '../session/store.js'
+import { runTurn, setMode, setPermissionMode, startNewSession } from '@topupsaja/core/agent/loop.js'
+import { compactNow, messagesTokens, contextWindowFor } from '@topupsaja/core/session/compaction.js'
+import { detachPath, addDoc, expandMentions, loadAgentsMd } from '@topupsaja/core/session/context.js'
+import { buildSystemPrompt, resolveModeArg, discoverCustomModes, modeNotice, ALL_MODES, MODE_INFO } from '@topupsaja/core/agent/modes.js'
+import { AgentSession, listSessions } from '@topupsaja/core/session/store.js'
 import { discoverCommands, renderCommand } from '../commands.js'
-import { parseMcpToolName, mapPromptArgs } from '../mcp/client.js'
+import { parseMcpToolName, mapPromptArgs } from '@topupsaja/core/mcp/client.js'
 import { helpText as baseHelp, SHORT_HELP, settingsText, apiText, applyApiKey, addPathMessage, costText, mcpStatusText } from '../usage.js'
-import { undoLastTurn, diffCheckpoints } from '../agent/checkpoints.js'
-import { runLocal, formatRunOutput } from '../agent/commands-run.js'
-import { collectDiff, generateCommitMessage, performCommit } from '../agent/commit.js'
-import { rulesSummary, derivePatternFromCommand, permissionLogLines } from '../agent/rules.js'
-import type { AgentRuntime } from '../agent/runtime.js'
-import type { AskUserRequest } from '../agent/runtime.js'
+import { undoLastTurn, diffCheckpoints } from '@topupsaja/core/agent/checkpoints.js'
+import { runLocal, formatRunOutput } from '@topupsaja/core/agent/commands-run.js'
+import { collectDiff, generateCommitMessage, performCommit } from '@topupsaja/core/agent/commit.js'
+import { rulesSummary, derivePatternFromCommand, permissionLogLines } from '@topupsaja/core/agent/rules.js'
+import type { AgentRuntime } from '@topupsaja/core/agent/runtime.js'
+import type { AskUserRequest } from '@topupsaja/core/agent/runtime.js'
 import { fmtNum, truncate } from './format.js'
 
 /** Help penuh: built-in (berkelompok) + custom commands (discovery per pemanggilan). */
@@ -26,8 +26,8 @@ const INIT_PROMPT =
   'Buat file AGENTS.md di root project ini. Isi ringkas dan padat: deskripsi project (deteksi dari struktur & package manifest), cara install/build/dev/test, konvensi kode yang terlihat, dan struktur folder utama. Tulis dalam Bahasa Indonesia.'
 
 /** Banner sesi teks polos. */
-export function banner(rt: AgentRuntime): void {
-  const agents = loadAgentsMd(rt.cwd) ? ' · AGENTS.md dimuat' : ''
+export async function banner(rt: AgentRuntime): Promise<void> {
+  const agents = (await loadAgentsMd(rt.cwd)) ? ' · AGENTS.md dimuat' : ''
   const rules = rt.permissions.rules.length > 0 ? ` · ${rt.permissions.rules.length} aturan` : ''
   const lines = [
     `${pc.bold(pc.cyan('topupsaja'))} ${pc.dim('v2 — coding agent TopUpSaja (mode non-TTY)')}`,
@@ -92,7 +92,7 @@ export function installPlainListeners(rt: AgentRuntime): () => void {
         }
         if (ans === 'n' || ans === 'no' || ans === '') break
       }
-      const warning = rt.permissions.answer(
+      const warning = await rt.permissions.answer(
         req.id,
         { approved, always: approved && always, alwaysPattern: approved && alwaysPattern },
         req.tool,
@@ -165,7 +165,7 @@ export function installPlainListeners(rt: AgentRuntime): () => void {
 export async function runOneShot(rt: AgentRuntime, prompt: string): Promise<void> {
   const detach = installPlainListeners(rt)
   try {
-    await runTurn(rt, expandMentions(prompt, rt.cwd))
+    await runTurn(rt, await expandMentions(prompt, rt.cwd))
   } finally {
     detach()
   }
@@ -216,7 +216,7 @@ export async function runPrint(
     rt.emitter.on('error', (m) => process.stderr.write(`✗ ${m}\n`)),
   ]
   try {
-    await runTurn(rt, expandMentions(prompt, rt.cwd))
+    await runTurn(rt, await expandMentions(prompt, rt.cwd))
   } finally {
     detachGuard()
     offs.forEach((off) => off())
@@ -253,7 +253,7 @@ async function pickModelPlain(preferred?: string): Promise<string | null> {
 }
 
 async function pickSessionPlain(rt: AgentRuntime): Promise<AgentSession | null> {
-  const sessions = listSessions(rt.cwd)
+  const sessions = await listSessions(rt.cwd)
   if (sessions.length === 0) {
     process.stdout.write(pc.yellow('Tidak ada sesi tersimpan untuk folder ini.\n'))
     return null
@@ -270,7 +270,7 @@ async function pickSessionPlain(rt: AgentRuntime): Promise<AgentSession | null> 
     if (!ans) return null
     const idx = parseInt(ans, 10)
     if (idx >= 1 && idx <= Math.min(15, sessions.length)) {
-      return AgentSession.load(rt.cwd, sessions[idx - 1].id)
+      return (await AgentSession.load(rt.cwd, sessions[idx - 1].id)) ?? null
     }
     process.stdout.write(pc.red(`Pilihan tidak valid: '${ans}'.\n`))
   }
@@ -334,13 +334,13 @@ export async function runPlainRepl(rt: AgentRuntime): Promise<void> {
           case '/act': {
             const m = resolveModeArg(cmd.slice(1), rt.customModes)
             if (m) {
-              setMode(rt, m)
+              await setMode(rt, m)
               process.stdout.write(pc.green(modeNotice(m, rt.customModes) + '\n\n'))
             }
             continue
           }
           case '/mode': {
-            rt.customModes = discoverCustomModes(rt.cwd)
+            rt.customModes = await discoverCustomModes(rt.cwd)
             const arg = line.split(/\s+/).slice(1).join(' ').trim()
             if (!arg) {
               process.stdout.write('\n')
@@ -367,14 +367,14 @@ export async function runPlainRepl(rt: AgentRuntime): Promise<void> {
               )
               continue
             }
-            setMode(rt, m)
+            await setMode(rt, m)
             process.stdout.write(pc.green(modeNotice(m, rt.customModes) + '\n\n'))
             continue
           }
           case '/permissions': {
             const order = ['ask', 'auto-edit', 'yolo'] as const
             const next = order[(order.indexOf(rt.permissions.mode) + 1) % order.length]
-            setPermissionMode(rt, next)
+            await setPermissionMode(rt, next)
             const logLines = permissionLogLines(rt.session.permissionLog, 5)
             process.stdout.write(
               pc.green(`Permission mode: ${next}`) +
@@ -414,18 +414,18 @@ export async function runPlainRepl(rt: AgentRuntime): Promise<void> {
             const picked = await pickModelPlain(rt.session.model)
             if (picked) {
               rt.session.model = picked
-              rt.session.save()
+              await rt.session.save()
               process.stdout.write(pc.green(`model diganti ke ${picked}\n\n`))
             }
             continue
           }
           case '/settings':
-            process.stdout.write(pc.dim(`\n${settingsText(rt)}\n\nubah: /model, /permissions, atau \`topupsaja login\` di terminal\n\n`))
+            process.stdout.write(pc.dim(`\n${await settingsText(rt)}\n\nubah: /model, /permissions, atau \`topupsaja login\` di terminal\n\n`))
             continue
           case '/api': {
             const arg = line.slice(cmd.length).trim()
             if (!arg) {
-              process.stdout.write(pc.dim(apiText() + '\n\n'))
+              process.stdout.write(pc.dim((await apiText()) + '\n\n'))
               continue
             }
             busy = true
@@ -443,7 +443,7 @@ export async function runPlainRepl(rt: AgentRuntime): Promise<void> {
               process.stdout.write(pc.dim('Pemakaian: /add <path|folder>  (TUI: /add tanpa arg buka pencari file)\n\n'))
               continue
             }
-            process.stdout.write(pc.dim(addPathMessage(rt, arg) + '\n\n'))
+            process.stdout.write(pc.dim((await addPathMessage(rt, arg)) + '\n\n'))
             continue
           }
           case '/drop': {
@@ -452,11 +452,11 @@ export async function runPlainRepl(rt: AgentRuntime): Promise<void> {
               process.stdout.write(pc.dim('Pemakaian: /drop <path|all>\n\n'))
               continue
             }
-            process.stdout.write(pc.dim(detachPath(rt.session, rt.cwd, arg).message + '\n\n'))
+            process.stdout.write(pc.dim((await detachPath(rt.session, rt.cwd, arg)).message + '\n\n'))
             continue
           }
           case '/clear-files': {
-            process.stdout.write(pc.dim(detachPath(rt.session, rt.cwd, 'all').message + '\n\n'))
+            process.stdout.write(pc.dim((await detachPath(rt.session, rt.cwd, 'all')).message + '\n\n'))
             continue
           }
           case '/add-doc': {
@@ -486,7 +486,7 @@ export async function runPlainRepl(rt: AgentRuntime): Promise<void> {
             const r = await runLocal(rt.cwd, runCmd)
             const formatted = formatRunOutput(runCmd, r)
             rt.session.messages.push({ role: 'user', content: formatted })
-            rt.session.save()
+            await rt.session.save()
             process.stdout.write(pc.dim(formatted + '\n\n'))
             continue
           }
@@ -520,13 +520,13 @@ export async function runPlainRepl(rt: AgentRuntime): Promise<void> {
           }
           case '/new':
           case '/new-task': {
-            const s = startNewSession(rt)
+            const s = await startNewSession(rt)
             process.stdout.write(pc.green(`Sesi baru: ${s.id} (model ${s.model})\n\n`))
             continue
           }
           case '/clear':
           case '/reset':
-            rt.session.reset(buildSystemPrompt(rt.cwd, rt.mode, rt.customModes))
+            rt.session.reset(await buildSystemPrompt(rt.cwd, rt.mode, rt.customModes))
             process.stdout.write(pc.dim('Riwayat percakapan di-reset.\n\n'))
             continue
           case '/cost':
@@ -551,7 +551,7 @@ export async function runPlainRepl(rt: AgentRuntime): Promise<void> {
             process.stdout.write(pc.dim(fullHelp(rt.cwd) + '\n\n'))
             continue
           case '/undo': {
-            const restored = undoLastTurn(rt)
+            const restored = await undoLastTurn(rt)
             process.stdout.write(
               restored.length
                 ? pc.green(`Di-undo: ${restored.join(', ')}\n\n`)
@@ -560,7 +560,7 @@ export async function runPlainRepl(rt: AgentRuntime): Promise<void> {
             continue
           }
           case '/diff':
-            process.stdout.write(pc.dim(diffCheckpoints(rt) + '\n\n'))
+            process.stdout.write(pc.dim((await diffCheckpoints(rt)) + '\n\n'))
             continue
           case '/mcp': {
             const arg = line.split(/\s+/).slice(1).join(' ').trim()
@@ -587,12 +587,12 @@ export async function runPlainRepl(rt: AgentRuntime): Promise<void> {
                 continue
               }
               const text = await conn.getPrompt(parsed!.tool, mapPromptArgs(def, line.slice(cmd.length).trim()))
-              await doTurn(expandMentions(text, rt.cwd))
+              await doTurn(await expandMentions(text, rt.cwd))
               continue
             }
             const cc = discoverCommands(rt.cwd).find((c) => c.name === cmd)
             if (cc) {
-              await doTurn(expandMentions(renderCommand(cc, line.slice(cmd.length).trim()), rt.cwd))
+              await doTurn(await expandMentions(renderCommand(cc, line.slice(cmd.length).trim()), rt.cwd))
               continue
             }
             process.stdout.write(pc.yellow(`Perintah tidak dikenal: ${cmd}. Coba /help\n\n`))
@@ -606,7 +606,7 @@ export async function runPlainRepl(rt: AgentRuntime): Promise<void> {
     }
 
     try {
-      await doTurn(expandMentions(line, rt.cwd))
+      await doTurn(await expandMentions(line, rt.cwd))
     } catch (e) {
       process.stdout.write(pc.red(`\n✗ ${(e as Error).message}\n\n`))
     }

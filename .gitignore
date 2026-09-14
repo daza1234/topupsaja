@@ -7,7 +7,11 @@ out/
 *.log
 .DS_Store
 cli/dist/
+core/dist/
 .tsa/
 *.tmp.mjs
-# web/ punya repo git sendiri (github daza1234/-topupsaja-web) — tracked di sana
+# web/ punya repo git sendiri (github daza1234/topupsaja) — tracked di sana
 web/
+
+# codegraph index (local tooling)
+.codegraph/

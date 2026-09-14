@@ -1,6 +1,6 @@
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import { extname, join, relative, resolve, sep } from 'pathe'
+import { getHost } from '../host.js'
+import type { HostDirent, HostStats } from '../host.js'
 import ignore from 'ignore'
 import { ContentPart } from '../api.js'
 import type { AgentSession } from './store.js'
@@ -28,11 +28,11 @@ const DEFAULT_EXCLUDE = [
 ]
 
 /** Ignore matcher: default exclude + .gitignore cwd (semantik gitignore penuh). */
-export function loadIgnore(cwd: string): ignore.Ignore {
+export async function loadIgnore(cwd: string): Promise<ignore.Ignore> {
   const ig = ignore()
   ig.add(DEFAULT_EXCLUDE)
   try {
-    ig.add(fs.readFileSync(path.join(cwd, '.gitignore'), 'utf8'))
+    ig.add(await getHost().fs.readFile(join(cwd, '.gitignore'), 'utf8'))
   } catch {
     /* tanpa .gitignore — default saja */
   }
@@ -46,11 +46,11 @@ export function isIgnored(ig: ignore.Ignore, rel: string): boolean {
 }
 
 /** Baca AGENTS.md di cwd (truncate 50k char). Return null bila tidak ada. */
-export function loadAgentsMd(cwd: string): string | null {
+export async function loadAgentsMd(cwd: string): Promise<string | null> {
   for (const name of ['AGENTS.md', 'agents.md']) {
-    const p = path.join(cwd, name)
+    const p = join(cwd, name)
     try {
-      const content = fs.readFileSync(p, 'utf8')
+      const content = await getHost().fs.readFile(p, 'utf8')
       return content.length > MAX_MENTION_CHARS
         ? content.slice(0, MAX_MENTION_CHARS) + '\n... (dipotong 50k char)'
         : content
@@ -62,10 +62,10 @@ export function loadAgentsMd(cwd: string): string | null {
 }
 
 /** Memory global ~/.topupsaja/AGENTS.md (label "global"). Return null bila tidak ada. */
-export function loadGlobalAgentsMd(): string | null {
-  const p = path.join(os.homedir(), '.topupsaja', 'AGENTS.md')
+export async function loadGlobalAgentsMd(): Promise<string | null> {
+  const p = join(getHost().homedir(), '.topupsaja', 'AGENTS.md')
   try {
-    const content = fs.readFileSync(p, 'utf8')
+    const content = await getHost().fs.readFile(p, 'utf8')
     return content.length > MAX_MENTION_CHARS
       ? content.slice(0, MAX_MENTION_CHARS) + '\n... (dipotong 50k char)'
       : content
@@ -74,31 +74,31 @@ export function loadGlobalAgentsMd(): string | null {
   }
 }
 
-function walkProjectFiles(
+async function walkProjectFiles(
   dir: string,
   base: string,
   out: string[],
   depth: number,
   ig?: ignore.Ignore,
   ignoreRoot?: string
-): void {
+): Promise<void> {
   if (depth > 6 || out.length >= 2000) return
-  let entries: fs.Dirent[]
+  let entries: HostDirent[]
   try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
+    entries = await getHost().fs.readdir(dir, { withFileTypes: true })
   } catch {
     return
   }
   for (const e of entries) {
     if (out.length >= 2000) return
-    const full = path.join(dir, e.name)
-    const rel = path.relative(base, full)
+    const full = join(dir, e.name)
+    const rel = relative(base, full)
     // Uji ignore terhadap path relatif root ignore (cwd), bukan base walk.
-    const relIg = ignoreRoot ? path.relative(ignoreRoot, full) : rel
+    const relIg = ignoreRoot ? relative(ignoreRoot, full) : rel
     if (e.isDirectory()) {
       if (SKIP_DIRS.has(e.name) || e.name.startsWith('.')) continue
       if (ig && isIgnored(ig, relIg)) continue
-      walkProjectFiles(full, base, out, depth + 1, ig, ignoreRoot)
+      await walkProjectFiles(full, base, out, depth + 1, ig, ignoreRoot)
     } else if (e.isFile()) {
       if (ig && isIgnored(ig, relIg)) continue
       out.push(rel)
@@ -107,10 +107,10 @@ function walkProjectFiles(
 }
 
 /** Daftar path file relatif cwd — untuk autocomplete @-mention di TUI. */
-export function listProjectFiles(cwd: string): string[] {
+export async function listProjectFiles(cwd: string): Promise<string[]> {
   const out: string[] = []
-  const ig = loadIgnore(cwd)
-  walkProjectFiles(cwd, cwd, out, 0, ig, cwd)
+  const ig = await loadIgnore(cwd)
+  await walkProjectFiles(cwd, cwd, out, 0, ig, cwd)
   return out.sort()
 }
 
@@ -119,24 +119,24 @@ export function listProjectFiles(cwd: string): string[] {
  * di cwd diganti blok berisi isi file (truncate 50k char per file).
  * Token yang tidak cocok dibiarkan apa adanya.
  */
-export function expandMentions(text: string, cwd: string): string {
+export async function expandMentions(text: string, cwd: string): Promise<string> {
   const re = /(?:^|(?<=\s))@([^\s@,.;:!?)]+)/g
   let result = ''
   let last = 0
   for (const m of text.matchAll(re)) {
     const rel = m[1]
-    const abs = path.resolve(cwd, rel)
+    const abs = resolve(cwd, rel)
     let content: string | null = null
     try {
-      const stat = fs.statSync(abs)
+      const stat = await getHost().fs.stat(abs)
       if (stat.isDirectory()) {
-        const ig = loadIgnore(cwd)
+        const ig = await loadIgnore(cwd)
         const files: string[] = []
-        walkProjectFiles(abs, abs, files, 0, ig, cwd)
+        await walkProjectFiles(abs, abs, files, 0, ig, cwd)
         content = files.slice(0, 100).map((f) => `${rel}/${f}`).join('\n')
         if (!content) content = `(folder '${rel}' kosong)`
       } else {
-        content = fs.readFileSync(abs, 'utf8')
+        content = await getHost().fs.readFile(abs, 'utf8')
         if (content.length > MAX_MENTION_CHARS) {
           content = content.slice(0, MAX_MENTION_CHARS) + '\n... (dipotong 50k char)'
         }
@@ -195,20 +195,20 @@ const MAX_IMAGE_BYTES = 5_000_000
 
 /** Path punya ekstensi gambar yang dikenal? */
 export function isImagePath(rel: string): boolean {
-  return IMAGE_EXTS.has(path.extname(rel).toLowerCase())
+  return IMAGE_EXTS.has(extname(rel).toLowerCase())
 }
 
 /**
  * Baca file gambar → ContentPart vision (base64 data-URL).
  * Return null bila file tidak terbaca atau >5MB.
  */
-export function encodeImagePart(abs: string): ContentPart | null {
+export async function encodeImagePart(abs: string): Promise<ContentPart | null> {
   try {
-    const mime = MIME_BY_EXT[path.extname(abs).toLowerCase()]
+    const mime = MIME_BY_EXT[extname(abs).toLowerCase()]
     if (!mime) return null
-    const stat = fs.statSync(abs)
+    const stat = await getHost().fs.stat(abs)
     if (!stat.isFile() || stat.size > MAX_IMAGE_BYTES) return null
-    const b64 = fs.readFileSync(abs).toString('base64')
+    const b64 = await getHost().fs.readFile(abs, 'base64')
     return { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } }
   } catch {
     return null
@@ -225,17 +225,17 @@ export interface AttachResult {
 
 /** Normalisasi target user → path relatif cwd (slash, tanpa ./). */
 export function normRel(cwd: string, target: string): string {
-  return path.relative(cwd, path.resolve(cwd, target)).split(path.sep).join('/')
+  return relative(cwd, resolve(cwd, target)).split(sep).join('/')
 }
 
-function readCapped(abs: string): { content: string; skipped: string } | null {
+async function readCapped(abs: string): Promise<{ content: string; skipped: string } | null> {
   try {
-    const stat = fs.statSync(abs)
+    const stat = await getHost().fs.stat(abs)
     if (!stat.isFile()) return null
     if (stat.size > MAX_ATTACH_BYTES) {
       return { content: '', skipped: 'too-big' }
     }
-    let content = fs.readFileSync(abs, 'utf8')
+    let content = await getHost().fs.readFile(abs, 'utf8')
     if (content.length > MAX_ATTACH_CHARS) {
       content = content.slice(0, MAX_ATTACH_CHARS) + '\n... (dipotong 20k char)'
     }
@@ -249,12 +249,12 @@ function readCapped(abs: string): { content: string; skipped: string } | null {
  * /add: lampirkan file langsung atau folder (expand via listProjectFiles —
  * hormati .gitignore, cap 20 file). Gambar ditolak, file >1MB dilewati.
  */
-export function attachPath(session: AgentSession, cwd: string, target: string): AttachResult {
+export async function attachPath(session: AgentSession, cwd: string, target: string): Promise<AttachResult> {
   const rel = normRel(cwd, target)
-  const abs = path.resolve(cwd, rel)
-  let stat: fs.Stats
+  const abs = resolve(cwd, rel)
+  let stat: HostStats
   try {
-    stat = fs.statSync(abs)
+    stat = await getHost().fs.stat(abs)
   } catch {
     return { ok: false, message: `Tidak ditemukan: ${target}`, added: 0 }
   }
@@ -262,26 +262,26 @@ export function attachPath(session: AgentSession, cwd: string, target: string): 
   if (stat.isFile()) {
     if (isImagePath(rel)) {
       // Gambar → sinyal khusus; UI membuat user message vision one-shot.
-      const part = encodeImagePart(abs)
+      const part = await encodeImagePart(abs)
       if (!part) {
         return { ok: false, message: `Gagal melampirkan ${rel} — gambar tidak terbaca atau >5MB.`, added: 0 }
       }
       return { ok: true, message: '', added: 0, image: { path: rel, abs, bytes: stat.size, part } }
     }
-    const r = readCapped(abs)
+    const r = await readCapped(abs)
     if (!r) return { ok: false, message: `Gagal membaca ${rel}.`, added: 0 }
     if (r.skipped === 'too-big') {
       return { ok: false, message: `Dilewati (>1MB): ${rel}`, added: 0 }
     }
     session.attached = session.attached.filter((a) => a.path !== rel)
     session.attached.push({ path: rel, content: r.content, added_at: new Date().toISOString() })
-    session.save()
+    await session.save()
     return { ok: true, message: `Dilampirkan: ${rel} (${r.content.length} char)`, added: 1 }
   }
 
   // Folder → expand via listProjectFiles (hormati .gitignore), cap 20 file.
-  const ig = loadIgnore(cwd)
-  const all = listProjectFiles(cwd).filter((f) => f === rel || f.startsWith(rel + '/'))
+  const ig = await loadIgnore(cwd)
+  const all = (await listProjectFiles(cwd)).filter((f) => f === rel || f.startsWith(rel + '/'))
   if (all.length === 0) {
     return { ok: false, message: `Folder '${rel}' tidak berisi file (atau semua di-ignore).`, added: 0 }
   }
@@ -294,7 +294,7 @@ export function attachPath(session: AgentSession, cwd: string, target: string): 
       skipped++
       continue
     }
-    const r = readCapped(path.resolve(cwd, f))
+    const r = await readCapped(resolve(cwd, f))
     if (!r || r.skipped === 'too-big') {
       skipped++
       continue
@@ -304,7 +304,7 @@ export function attachPath(session: AgentSession, cwd: string, target: string): 
     added++
   }
   const over = all.length - picked.length
-  session.save()
+  await session.save()
   const notes = [`Folder '${rel}': ${added} file dilampirkan.`]
   if (over > 0) notes.push(`${over} file dilewati (cap ${MAX_DIR_FILES} file per folder).`)
   if (skipped > 0) notes.push(`${skipped} dilewati (gambar / >1MB).`)
@@ -312,12 +312,12 @@ export function attachPath(session: AgentSession, cwd: string, target: string): 
 }
 
 /** /drop: hapus lampiran per path, atau 'all' (semua file + docs). */
-export function detachPath(session: AgentSession, cwd: string, target: string): AttachResult {
+export async function detachPath(session: AgentSession, cwd: string, target: string): Promise<AttachResult> {
   if (target === 'all') {
     const n = session.attached.length + session.docs.length
     session.attached = []
     session.docs = []
-    session.save()
+    await session.save()
     return { ok: true, message: n ? `Semua lampiran dihapus (${n} item).` : 'Tidak ada lampiran.', added: 0 }
   }
   const rel = normRel(cwd, target)
@@ -327,7 +327,7 @@ export function detachPath(session: AgentSession, cwd: string, target: string): 
   if (removed === 0) {
     return { ok: false, message: `Tidak ada lampiran bernama '${rel}'. Lihat /add.`, added: 0 }
   }
-  session.save()
+  await session.save()
   return { ok: true, message: `Lampiran dihapus: ${rel}`, added: 0 }
 }
 
@@ -394,7 +394,7 @@ export async function addDoc(session: AgentSession, url: string): Promise<Attach
     text.length > MAX_ATTACH_CHARS ? text.slice(0, MAX_ATTACH_CHARS) + '\n... (dipotong 20k char)' : text
   session.docs = session.docs.filter((d) => d.url !== url)
   session.docs.push({ url, title, content, added_at: new Date().toISOString() })
-  session.save()
+  await session.save()
   return { ok: true, message: `Doc ditambahkan: ${title} (${content.length} char)`, added: 1 }
 }
 

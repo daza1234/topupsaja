@@ -1,4 +1,5 @@
-import fs from 'node:fs'
+import { join, resolve } from 'pathe'
+import { getHost } from '../host.js'
 import pc from 'picocolors'
 import { saveConfig, loadConfig, PermissionMode } from '../config.js'
 import { classifyBash } from './shell-safety.js'
@@ -81,7 +82,7 @@ export class PermissionManager {
   private seq = 0
   private pending = new Map<string, (a: ApprovalAnswer) => void>()
 
-  constructor(mode: PermissionMode, allowlist: string[] = [], rules: PermissionRule[] = [], cwd = process.cwd()) {
+  constructor(mode: PermissionMode, allowlist: string[] = [], rules: PermissionRule[] = [], cwd = getHost().cwd()) {
     this.mode = mode
     this.allowlist = new Set(allowlist)
     this.rules = rules
@@ -93,37 +94,39 @@ export class PermissionManager {
    * Jawaban approval dari UI. Return string warning (bila "always" ter-bayangi
    * rule granular → tidak disimpan) atau null. Pemanggil menampilkan warning.
    */
-  answer(id: string, answer: ApprovalAnswer, tool?: string, args?: Record<string, unknown>): string | null {
-    const resolve = this.pending.get(id)
-    if (!resolve) return null
-    this.pending.delete(id)
-    if (answer.approved && answer.always && tool) {
-      // Rule granular ask/deny yang match tool+args → jangan tulis allowlist
-      // (akan ter-bayangi / melanggar rule user yang lebih spesifik).
-      const ruleAction = decideRule(this.rules, tool, args ?? {}, this.cwd)
-      if (ruleAction === 'ask' || ruleAction === 'deny') {
-        resolve(answer)
-        return `Izin 'always' tidak disimpan: ada rule granular (${ruleAction}) yang match untuk ${tool}.`
-      }
-      this.allowlist.add(tool)
-      const cfg = loadConfig()
-      const list = new Set(cfg.tool_allowlist ?? [])
-      list.add(tool)
-      saveConfig({ tool_allowlist: [...list] })
-    }
-    if (answer.approved && answer.alwaysPattern && tool === 'bash' && args) {
-      const cmd = String(args.command ?? '')
-      const pattern = derivePatternFromCommand(cmd)
-      if (pattern) {
-        const file = savePatternRule(this.cwd, tool, pattern)
-        if (file) {
+  answer(id: string, answer: ApprovalAnswer, tool?: string, args?: Record<string, unknown>): Promise<string | null> {
+    return (async () => {
+      const resolve = this.pending.get(id)
+      if (!resolve) return null
+      this.pending.delete(id)
+      if (answer.approved && answer.always && tool) {
+        // Rule granular ask/deny yang match tool+args → jangan tulis allowlist
+        // (akan ter-bayangi / melanggar rule user yang lebih spesifik).
+        const ruleAction = decideRule(this.rules, tool, args ?? {}, this.cwd)
+        if (ruleAction === 'ask' || ruleAction === 'deny') {
           resolve(answer)
-          return `Rule allow dibuat: bash "${pattern}" (${file}).`
+          return `Izin 'always' tidak disimpan: ada rule granular (${ruleAction}) yang match untuk ${tool}.`
+        }
+        this.allowlist.add(tool)
+        const cfg = await loadConfig()
+        const list = new Set(cfg.tool_allowlist ?? [])
+        list.add(tool)
+        await saveConfig({ tool_allowlist: [...list] })
+      }
+      if (answer.approved && answer.alwaysPattern && tool === 'bash' && args) {
+        const cmd = String(args.command ?? '')
+        const pattern = derivePatternFromCommand(cmd)
+        if (pattern) {
+          const file = await savePatternRule(this.cwd, tool, pattern)
+          if (file) {
+            resolve(answer)
+            return `Rule allow dibuat: bash "${pattern}" (${file}).`
+          }
         }
       }
-    }
-    resolve(answer)
-    return null
+      resolve(answer)
+      return null
+    })()
   }
 
   /**
@@ -166,16 +169,16 @@ export class PermissionManager {
     return NEED_APPROVAL.has(cls) ? 'ask' : 'allow'
   }
 
-  static buildPreview(tool: string, args: Record<string, unknown>): { label: string; preview: string } {
+  static async buildPreview(tool: string, args: Record<string, unknown>): Promise<{ label: string; preview: string }> {
     switch (tool) {
       case 'bash':
         return { label: `Jalankan command`, preview: String(args.command ?? '') }
       case 'write_file': {
-        const exists = fs.existsSync(String(args.path))
+        const exists = await getHost().fs.exists(String(args.path))
         const content = String(args.content ?? '')
         let preview: string
         if (exists) {
-          const cur = fs.readFileSync(String(args.path), 'utf8')
+          const cur = await getHost().fs.readFile(String(args.path), 'utf8')
           preview = simpleDiff(cur, content)
         } else {
           preview = content
@@ -200,8 +203,8 @@ export class PermissionManager {
   }
 
   /** Untuk UI: buat request lengkap dengan preview siap tampil. */
-  makeRequest(tool: string, args: Record<string, unknown>): ApprovalRequest {
-    const { label, preview } = PermissionManager.buildPreview(tool, args)
+  async makeRequest(tool: string, args: Record<string, unknown>): Promise<ApprovalRequest> {
+    const { label, preview } = await PermissionManager.buildPreview(tool, args)
     return { id: this.newRequestId(), tool, args, preview, label }
   }
 

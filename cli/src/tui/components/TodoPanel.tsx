@@ -1,6 +1,6 @@
 import React from 'react'
 import { Text, Box } from 'ink'
-import type { TodoItem } from '../../storage/todo.js'
+import type { TodoItem } from '@topupsaja/core/storage/todo.js'
 
 const ICON: Record<TodoItem['status'], string> = {
   pending: '[ ]',

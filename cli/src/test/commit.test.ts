@@ -1,10 +1,11 @@
+import '../bootstrap.js'
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { extractCommitMessage, isGitRepo } from '../agent/commit.js'
-import { runLocal, formatRunOutput } from '../agent/commands-run.js'
+import { extractCommitMessage, isGitRepo } from '@topupsaja/core/agent/commit.js'
+import { runLocal, formatRunOutput } from '@topupsaja/core/agent/commands-run.js'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-commit-'))
 

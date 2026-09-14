@@ -1,13 +1,14 @@
+import '../bootstrap.js'
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { encodeImagePart, isImagePath, attachPath } from '../session/context.js'
-import { messagesTokens } from '../session/compaction.js'
+import { encodeImagePart, isImagePath, attachPath } from '@topupsaja/core/session/context.js'
+import { messagesTokens } from '@topupsaja/core/session/compaction.js'
 import { addPathMessage } from '../usage.js'
-import { AgentSession } from '../session/store.js'
-import { AskUserManager, type AgentRuntime } from '../agent/runtime.js'
+import { AgentSession } from '@topupsaja/core/session/store.js'
+import { AskUserManager, type AgentRuntime } from '@topupsaja/core/agent/runtime.js'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-image-'))
 const origCwd = process.cwd()
@@ -58,7 +59,7 @@ function fakeRt(session: AgentSession, supportsVision?: boolean): AgentRuntime {
   }
 }
 
-test('isImagePath: ekstensi gambar dikenali, non-gambar ditolak', () => {
+test('isImagePath: ekstensi gambar dikenali, non-gambar ditolak', async () => {
   assert.ok(isImagePath('a.png'))
   assert.ok(isImagePath('sub/dir/foto.JPG'))
   assert.ok(isImagePath('a.webp'))
@@ -67,25 +68,25 @@ test('isImagePath: ekstensi gambar dikenali, non-gambar ditolak', () => {
   assert.ok(!isImagePath('tanpaekstensi'))
 })
 
-test('encodeImagePart: mime map + base64 data-URL', () => {
-  const part = encodeImagePart(path.join(tmp, 'foto.png'))
+test('encodeImagePart: mime map + base64 data-URL', async () => {
+  const part = await encodeImagePart(path.join(tmp, 'foto.png'))
   assert.ok(part)
   assert.equal(part!.type, 'image_url')
   assert.ok(part!.type === 'image_url' && part!.image_url.url.startsWith('data:image/png;base64,'))
   const b64 = part!.type === 'image_url' ? part!.image_url.url.split(',')[1] : ''
   assert.equal(Buffer.from(b64, 'base64').length, PNG_1PX.length)
 
-  const jpg = encodeImagePart(path.join(tmp, 'gambar.JPG'))
+  const jpg = await encodeImagePart(path.join(tmp, 'gambar.JPG'))
   assert.ok(jpg && jpg.type === 'image_url' && jpg.image_url.url.startsWith('data:image/jpeg;base64,'))
-  assert.equal(encodeImagePart(path.join(tmp, 'dokumen.txt')), null, '.txt bukan gambar yang bisa di-encode')
+  assert.equal(await encodeImagePart(path.join(tmp, 'dokumen.txt')), null, '.txt bukan gambar yang bisa di-encode')
 })
 
-test('encodeImagePart: file >5MB → null, file hilang → null', () => {
-  assert.equal(encodeImagePart(path.join(tmp, 'besar.png')), null)
-  assert.equal(encodeImagePart(path.join(tmp, 'hilang.png')), null)
+test('encodeImagePart: file >5MB → null, file hilang → null', async () => {
+  assert.equal(await encodeImagePart(path.join(tmp, 'besar.png')), null)
+  assert.equal(await encodeImagePart(path.join(tmp, 'hilang.png')), null)
 })
 
-test('messagesTokens: content parts dihitung (text + konstanta image)', () => {
+test('messagesTokens: content parts dihitung (text + konstanta image)', async () => {
   const msgs = [
     { role: 'user' as const, content: [{ type: 'text' as const, text: 'abcd' }, { type: 'image_url' as const, image_url: { url: 'data:image/png;base64,xxx' } }] },
   ]
@@ -94,29 +95,29 @@ test('messagesTokens: content parts dihitung (text + konstanta image)', () => {
   assert.equal(messagesTokens([{ role: 'user', content: 'abcd' }]), 4)
 })
 
-test('store: roundtrip pesan content-parts', () => {
+test('store: roundtrip pesan content-parts', async () => {
   const s = AgentSession.create(tmp, 'ts/gpt-4.1-nano', 'SYSTEM')
   s.messages.push({
     role: 'user',
     content: [{ type: 'text', text: '[gambar] foto.png' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }],
   })
-  s.save()
-  const loaded = AgentSession.load(tmp, s.id)!
+  await s.save()
+  const loaded = (await AgentSession.load(tmp, s.id))!
   const c = loaded.messages[1].content
   assert.ok(Array.isArray(c))
   assert.equal(c[0].type, 'text')
   assert.equal(c[1].type, 'image_url')
 })
 
-test('addPathMessage: model non-vision → blok, model vision → user message one-shot', () => {
+test('addPathMessage: model non-vision → blok, model vision → user message one-shot', async () => {
   const blocked = AgentSession.create(tmp, 'ts/gpt-4.1-nano', 'SYSTEM')
-  const msg1 = addPathMessage(fakeRt(blocked, false), 'foto.png')
+  const msg1 = await addPathMessage(fakeRt(blocked, false), 'foto.png')
   assert.ok(msg1.includes('tidak mendukung vision'))
   assert.ok(msg1.includes('/model'))
   assert.equal(blocked.messages.length, 1, 'tidak ada pesan baru')
 
   const allowed = AgentSession.create(tmp, 'ts/gpt-4.1-nano', 'SYSTEM')
-  const msg2 = addPathMessage(fakeRt(allowed, true), 'foto.png')
+  const msg2 = await addPathMessage(fakeRt(allowed, true), 'foto.png')
   assert.ok(msg2.includes('Gambar dilampirkan: foto.png'))
   assert.ok(msg2.includes('KB'))
   const pushed = allowed.messages[1]
@@ -126,14 +127,14 @@ test('addPathMessage: model non-vision → blok, model vision → user message o
   assert.equal(pushed.content[1].type, 'image_url')
 
   const unknown = AgentSession.create(tmp, 'model-lain', 'SYSTEM')
-  const msg3 = addPathMessage(fakeRt(unknown, undefined), 'foto.png')
+  const msg3 = await addPathMessage(fakeRt(unknown, undefined), 'foto.png')
   assert.ok(msg3.includes('Gambar dilampirkan'), 'model tak dikenal di-scan vision=false → diizinkan')
 })
 
-test('attachPath: gambar tidak masuk attached (konteks), teks tetap masuk', () => {
+test('attachPath: gambar tidak masuk attached (konteks), teks tetap masuk', async () => {
   const s = AgentSession.create(tmp, 'ts/gpt-4.1-nano', 'SYSTEM')
-  attachPath(s, tmp, 'foto.png')
+  await attachPath(s, tmp, 'foto.png')
   assert.equal(s.attached.length, 0)
-  attachPath(s, tmp, 'dokumen.txt')
+  await attachPath(s, tmp, 'dokumen.txt')
   assert.equal(s.attached.length, 1)
 })

@@ -1,7 +1,7 @@
 {
   "name": "topupsaja-cli",
   "version": "0.8.0",
-  "description": "CLI coding agent TopUpSaja — agent terminal TUI dengan prepaid credit (tsa)",
+  "description": "CLI coding agent TopUpSaja \u2014 agent terminal TUI dengan prepaid credit (tsa)",
   "type": "module",
   "bin": {
     "topupsaja": "dist/index.js",
@@ -31,7 +31,8 @@
     "ignore": "^7.0.8",
     "ink": "^5.2.1",
     "picocolors": "^1.1.1",
-    "react": "^18.3.1"
+    "react": "^18.3.1",
+    "@topupsaja/core": "*"
   },
   "devDependencies": {
     "@types/ink-testing-library": "^1.0.4",

@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react'
 import { Text, Box, useInput } from 'ink'
-import type { ApprovalRequest } from '../../agent/permission.js'
-import { splitHunks } from '../../agent/hunks.js'
-import { derivePatternFromCommand } from '../../agent/rules.js'
+import type { ApprovalRequest } from '@topupsaja/core/agent/permission.js'
+import { splitHunks } from '@topupsaja/core/agent/hunks.js'
+import { derivePatternFromCommand } from '@topupsaja/core/agent/rules.js'
 
 interface Props {
   req: ApprovalRequest

@@ -1,8 +1,9 @@
+import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { costText, formatDuration } from '../usage.js'
-import { AgentSession } from '../session/store.js'
-import { AskUserManager, type AgentRuntime } from '../agent/runtime.js'
+import { AgentSession } from '@topupsaja/core/session/store.js'
+import { AskUserManager, type AgentRuntime } from '@topupsaja/core/agent/runtime.js'
 
 function fakeRt(session: AgentSession): AgentRuntime {
   return {

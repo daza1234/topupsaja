@@ -1,3 +1,4 @@
+import { join } from 'pathe'
 import { ChatMessage, ContentPart, ModelInfo, chatCompletion } from '../api.js'
 import type { AgentRuntime } from '../agent/runtime.js'
 

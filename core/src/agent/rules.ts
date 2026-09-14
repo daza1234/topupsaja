@@ -1,6 +1,5 @@
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'pathe'
+import { getHost } from '../host.js'
 import { globMatch } from './patterns.js'
 
 export type RuleAction = 'allow' | 'ask' | 'deny'
@@ -28,17 +27,17 @@ const ACTIONS: Set<string> = new Set(['allow', 'ask', 'deny'])
  * project (<cwd>/.tsa/settings.json). Rule invalid di-skip + error dikumpulkan.
  * File tidak ada / rusak TIDAK membuat gagal — hanya error utk notice.
  */
-export function loadPermissionRules(cwd: string): LoadRulesResult {
+export async function loadPermissionRules(cwd: string): Promise<LoadRulesResult> {
   const files: [string, PermissionRule['origin']][] = [
-    [path.join(os.homedir(), '.topupsaja', 'settings.json'), 'global'],
-    [path.join(cwd, '.tsa', 'settings.json'), 'project'],
+    [join(getHost().homedir(), '.topupsaja', 'settings.json'), 'global'],
+    [join(cwd, '.tsa', 'settings.json'), 'project'],
   ]
   const rules: PermissionRule[] = []
   const errors: string[] = []
   for (const [file, origin] of files) {
     let raw: string
     try {
-      raw = fs.readFileSync(file, 'utf8')
+      raw = await getHost().fs.readFile(file, 'utf8')
     } catch {
       continue // file tidak ada → tanpa rule dari sumber ini
     }
@@ -92,8 +91,8 @@ export function loadPermissionRules(cwd: string): LoadRulesResult {
 function matchTarget(tool: string, args: Record<string, unknown>, cwd: string): string {
   if (tool === 'bash') return String(args.command ?? '')
   if (tool === 'read_file' || tool === 'write_file' || tool === 'edit_file') {
-    const abs = path.resolve(cwd, String(args.path ?? ''))
-    return path.relative(cwd, abs).split(path.sep).join('/')
+    const abs = resolve(cwd, String(args.path ?? ''))
+    return relative(cwd, abs).split(sep).join('/')
   }
   if (tool === 'web_fetch') return String(args.url ?? '')
   return tool
@@ -161,16 +160,16 @@ export function derivePatternFromCommand(cmd: string): string | null {
 }
 
 /** Simpan rule allow berbasis pattern ke <cwd>/.tsa/settings.json (fallback ~/.topupsaja/settings.json). Return path file bila sukses. */
-export function savePatternRule(cwd: string, tool: string, pattern: string): string | null {
+export async function savePatternRule(cwd: string, tool: string, pattern: string): Promise<string | null> {
   const targets: [string, 'project' | 'global'][] = [
-    [path.join(cwd, '.tsa', 'settings.json'), 'project'],
-    [path.join(os.homedir(), '.topupsaja', 'settings.json'), 'global'],
+    [join(cwd, '.tsa', 'settings.json'), 'project'],
+    [join(getHost().homedir(), '.topupsaja', 'settings.json'), 'global'],
   ]
   for (const [file] of targets) {
     let root: Record<string, unknown> = {}
     let perms: unknown[] = []
     try {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown
+      const parsed = JSON.parse(await getHost().fs.readFile(file, 'utf8')) as unknown
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         root = parsed as Record<string, unknown>
         if (Array.isArray(root.permissions)) perms = root.permissions
@@ -178,7 +177,6 @@ export function savePatternRule(cwd: string, tool: string, pattern: string): str
     } catch {
       /* file belum ada / rusak → mulai baru */
     }
-    const entry = { tool, pattern, action: 'allow' as const }
     const exists = perms.some((p) => {
       const r = p as Record<string, unknown>
       return r.tool === tool && r.pattern === pattern && r.action === 'allow'
@@ -186,8 +184,8 @@ export function savePatternRule(cwd: string, tool: string, pattern: string): str
     if (!exists) perms.push({ tool, pattern, action: 'allow' })
     root.permissions = perms
     try {
-      fs.mkdirSync(path.dirname(file), { recursive: true })
-      fs.writeFileSync(file, JSON.stringify(root, null, 2) + '\n')
+      await getHost().fs.mkdir(dirname(file), { recursive: true })
+      await getHost().fs.writeFile(file, JSON.stringify(root, null, 2) + '\n')
       return file
     } catch {
       /* tidak bisa menulis project → coba fallback global */

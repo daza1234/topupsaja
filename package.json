@@ -1,0 +1,13 @@
+{
+  "name": "topupsaja",
+  "private": true,
+  "workspaces": [
+    "core",
+    "cli",
+    "desktop"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  }
+}

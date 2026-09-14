@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Text, Box, useInput } from 'ink'
-import type { AskUserRequest, AskUserAnswer } from '../../agent/runtime.js'
+import type { AskUserRequest, AskUserAnswer } from '@topupsaja/core/agent/runtime.js'
 
 interface Props {
   req: AskUserRequest

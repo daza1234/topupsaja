@@ -1,13 +1,14 @@
+import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { runTurn } from '../agent/loop.js'
-import { PermissionManager } from '../agent/permission.js'
-import { AskUserManager, AgentEmitter, type AgentRuntime } from '../agent/runtime.js'
-import { AgentSession } from '../session/store.js'
-import type { PermissionRule } from '../agent/rules.js'
+import { runTurn } from '@topupsaja/core/agent/loop.js'
+import { PermissionManager } from '@topupsaja/core/agent/permission.js'
+import { AskUserManager, AgentEmitter, type AgentRuntime } from '@topupsaja/core/agent/runtime.js'
+import { AgentSession } from '@topupsaja/core/session/store.js'
+import type { PermissionRule } from '@topupsaja/core/agent/rules.js'
 
 // ── Env hermetic: tmp HOME (session/config) + tmp cwd (bash/write) ──
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-loop-home-'))

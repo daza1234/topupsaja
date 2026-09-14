@@ -1,3 +1,4 @@
+import '../bootstrap.js'
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -10,17 +11,17 @@ import {
   resolveModeArg,
   modeNotice,
   type CustomMode,
-} from '../agent/modes.js'
-import { normalizeMode } from '../session/store.js'
-import { runFormatter, readFile, executeTool } from '../agent/exec.js'
-import { messagesTokens } from '../session/compaction.js'
-import { TodoStore } from '../storage/todo.js'
-import { mapPromptArgs, flattenPromptMessages, type McpPromptDef } from '../mcp/client.js'
-import { AskUserManager, type AgentRuntime } from '../agent/runtime.js'
-import { AgentSession } from '../session/store.js'
+} from '@topupsaja/core/agent/modes.js'
+import { normalizeMode } from '@topupsaja/core/session/store.js'
+import { runFormatter, readFile, executeTool } from '@topupsaja/core/agent/exec.js'
+import { messagesTokens } from '@topupsaja/core/session/compaction.js'
+import { TodoStore } from '@topupsaja/core/storage/todo.js'
+import { mapPromptArgs, flattenPromptMessages, type McpPromptDef } from '@topupsaja/core/mcp/client.js'
+import { AskUserManager, type AgentRuntime } from '@topupsaja/core/agent/runtime.js'
+import { AgentSession } from '@topupsaja/core/session/store.js'
 
 // ── discoverCustomModes ──
-test('discoverCustomModes: frontmatter desc + read_only, non-md diabaikan', () => {
+test('discoverCustomModes: frontmatter desc + read_only, non-md diabaikan', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-cmodes-'))
   fs.mkdirSync(path.join(tmp, '.tsa', 'modes'), { recursive: true })
   fs.writeFileSync(
@@ -37,7 +38,7 @@ test('discoverCustomModes: frontmatter desc + read_only, non-md diabaikan', () =
   )
   fs.writeFileSync(path.join(tmp, '.tsa', 'modes', 'notes.txt'), 'bukan mode')
 
-  const modes = discoverCustomModes(tmp)
+  const modes = await discoverCustomModes(tmp)
   const reviewer = modes.find((m) => m.name === 'reviewer')
   assert.ok(reviewer, 'reviewer harus ditemukan')
   assert.equal(reviewer!.description, 'Review kode')
@@ -57,12 +58,12 @@ test('discoverCustomModes: frontmatter desc + read_only, non-md diabaikan', () =
   after(() => fs.rmSync(tmp, { recursive: true, force: true }))
 })
 
-test('discoverCustomModes: nama file di-lowercase, dir tanpa .md → kosong', () => {
+test('discoverCustomModes: nama file di-lowercase, dir tanpa .md → kosong', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-cmodes2-'))
   fs.mkdirSync(path.join(tmp, '.tsa', 'modes'), { recursive: true })
   fs.writeFileSync(path.join(tmp, '.tsa', 'modes', 'DeepThink.md'), 'mikir dalam')
-  assert.equal(discoverCustomModes(tmp)[0].name, 'deepthink')
-  assert.deepEqual(discoverCustomModes(os.tmpdir() + '/pasti-tidak-ada-xyz'), [])
+  assert.equal((await discoverCustomModes(tmp))[0].name, 'deepthink')
+  assert.deepEqual(await discoverCustomModes(os.tmpdir() + '/pasti-tidak-ada-xyz'), [])
   after(() => fs.rmSync(tmp, { recursive: true, force: true }))
 })
 
@@ -72,7 +73,7 @@ const CM: CustomMode[] = [
   { name: 'writer', description: 'Menulis', body: 'Tulis.', readOnly: false },
 ]
 
-test('isReadOnlyMode: custom readOnly → true, non-readOnly → false', () => {
+test('isReadOnlyMode: custom readOnly → true, non-readOnly → false', async () => {
   assert.equal(isReadOnlyMode('reviewer', CM), true)
   assert.equal(isReadOnlyMode('writer', CM), false)
   assert.equal(isReadOnlyMode('architect'), true)
@@ -80,14 +81,14 @@ test('isReadOnlyMode: custom readOnly → true, non-readOnly → false', () => {
   assert.equal(isReadOnlyMode('tidakada', CM), false)
 })
 
-test('resolveModeArg: nama custom diterima, case-insensitive; unknown → null', () => {
+test('resolveModeArg: nama custom diterima, case-insensitive; unknown → null', async () => {
   assert.equal(resolveModeArg('REVIEWER', CM), 'reviewer')
   assert.equal(resolveModeArg(' writer ', CM), 'writer')
   assert.equal(resolveModeArg('plan'), 'architect')
   assert.equal(resolveModeArg('gakada', CM), null)
 })
 
-test('modeNotice: custom dirangkai dari description + readOnly', () => {
+test('modeNotice: custom dirangkai dari description + readOnly', async () => {
   const n = modeNotice('reviewer', CM)
   assert.ok(n.includes('REVIEWER'))
   assert.ok(n.includes('Review kode'))
@@ -96,27 +97,27 @@ test('modeNotice: custom dirangkai dari description + readOnly', () => {
 })
 
 // ── buildSystemPrompt custom ──
-test('buildSystemPrompt: custom section muncul; readOnly → aturan read-only', () => {
-  const p1 = buildSystemPrompt(os.tmpdir(), 'reviewer', CM)
+test('buildSystemPrompt: custom section muncul; readOnly → aturan read-only', async () => {
+  const p1 = await buildSystemPrompt(os.tmpdir(), 'reviewer', CM)
   assert.ok(p1.includes('MODE REVIEWER AKTIF'))
   assert.ok(p1.includes('Periksa.'))
   assert.ok(p1.includes('AKAN DITOLAK'))
   assert.ok(p1.includes('BUKAN sandbox'))
 
-  const p2 = buildSystemPrompt(os.tmpdir(), 'writer', CM)
+  const p2 = await buildSystemPrompt(os.tmpdir(), 'writer', CM)
   assert.ok(p2.includes('MODE WRITER AKTIF'))
   assert.ok(!p2.includes('AKAN DITOLAK'), 'non-readOnly tanpa blok read-only')
 
   // builtin tetap jalan dengan daftar custom diisi
-  const p3 = buildSystemPrompt(os.tmpdir(), 'architect', CM)
+  const p3 = await buildSystemPrompt(os.tmpdir(), 'architect', CM)
   assert.ok(p3.includes('MODE ARCHITECT'))
   // mode tak dikenal (tanpa custom) → tanpa section mode
-  const p4 = buildSystemPrompt(os.tmpdir(), 'modehilang', [])
+  const p4 = await buildSystemPrompt(os.tmpdir(), 'modehilang', [])
   assert.ok(!p4.includes('AKTIF (mode kustom'))
 })
 
 // ── normalizeMode dengan custom ──
-test('normalizeMode: mode custom valid disimpan, unknown → code, plan/act tetap dipetakan', () => {
+test('normalizeMode: mode custom valid disimpan, unknown → code, plan/act tetap dipetakan', async () => {
   assert.equal(normalizeMode('reviewer', CM), 'reviewer')
   assert.equal(normalizeMode('writer', CM), 'writer')
   assert.equal(normalizeMode('aneh', CM), 'code')
@@ -158,7 +159,7 @@ test('runFormatter: {file} jadi path absolut', async () => {
 })
 
 // ── MCP prompts: mapPromptArgs + flattenPromptMessages ──
-test('mapPromptArgs: positional → nama argumen, sisa digabung ke terakhir, missing → kosong', () => {
+test('mapPromptArgs: positional → nama argumen, sisa digabung ke terakhir, missing → kosong', async () => {
   const prompt: McpPromptDef = {
     name: 'hello',
     arguments: [{ name: 'target' }, { name: 'message' }],
@@ -171,7 +172,7 @@ test('mapPromptArgs: positional → nama argumen, sisa digabung ke terakhir, mis
   assert.deepEqual(mapPromptArgs(single, 'satu dua tiga'), { a: 'satu dua tiga' })
 })
 
-test('flattenPromptMessages: gabung text, prefix [role] untuk non-user', () => {
+test('flattenPromptMessages: gabung text, prefix [role] untuk non-user', async () => {
   const res = {
     messages: [
       { role: 'user', content: { type: 'text', text: 'Review ini:' } },
@@ -223,9 +224,9 @@ function fakeRt(supportsVision?: boolean): AgentRuntime {
   }
 }
 
-test('readFile: gambar → ok + image part + output [gambar]; offset/limit diabaikan', () => {
+test('readFile: gambar → ok + image part + output [gambar]; offset/limit diabaikan', async () => {
   process.chdir(IMG_DIR)
-  const r = readFile({ path: 'kecil.png', offset: 5, limit: 10 })
+  const r = await readFile({ path: 'kecil.png', offset: 5, limit: 10 })
   assert.ok(r.ok, r.output)
   assert.ok(r.image, 'image part terisi')
   assert.ok(r.image!.type === 'image_url' && r.image!.image_url.url.startsWith('data:image/png;base64,'))
@@ -233,13 +234,13 @@ test('readFile: gambar → ok + image part + output [gambar]; offset/limit diaba
   assert.ok(r.output.includes('KB'))
 })
 
-test('readFile: gambar >5MB → err; file teks tetap path lama', () => {
+test('readFile: gambar >5MB → err; file teks tetap path lama', async () => {
   process.chdir(IMG_DIR)
-  const big = readFile({ path: 'besar.png' })
+  const big = await readFile({ path: 'besar.png' })
   assert.equal(big.ok, false)
   assert.ok(big.output.includes('>5MB'))
 
-  const txt = readFile({ path: 'teks.txt' })
+  const txt = await readFile({ path: 'teks.txt' })
   assert.ok(txt.ok)
   assert.ok(!txt.image, 'file teks tanpa image part')
   assert.ok(txt.output.includes('1:'))
@@ -262,7 +263,7 @@ test('executeTool read_file: model non-vision → err pesan vision; vision → l
   assert.ok(unknown.ok, 'supports_vision undefined (unknown) → diizinkan')
 })
 
-test('messagesTokens: tool message content parts > text-only (sanity parts-aware)', () => {
+test('messagesTokens: tool message content parts > text-only (sanity parts-aware)', async () => {
   const imgPart = { type: 'image_url' as const, image_url: { url: 'data:image/png;base64,xxx' } }
   const withParts = [
     { role: 'assistant' as const, content: null, tool_calls: [{ id: 't1', type: 'function' as const, function: { name: 'read_file', arguments: '{"path":"kecil.png"}' } }] },

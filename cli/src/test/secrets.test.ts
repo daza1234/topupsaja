@@ -1,7 +1,8 @@
+import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { touchesSecretPath, touchesSecretTool } from '../agent/secrets.js'
-import { PermissionManager } from '../agent/permission.js'
+import { touchesSecretPath, touchesSecretTool } from '@topupsaja/core/agent/secrets.js'
+import { PermissionManager } from '@topupsaja/core/agent/permission.js'
 
 test('touchesSecretPath: .env & variants', () => {
   assert.equal(touchesSecretPath('cat .env'), true)

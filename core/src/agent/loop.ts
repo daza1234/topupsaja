@@ -1,3 +1,5 @@
+import { join } from 'pathe'
+import { getHost } from '../host.js'
 import { ApiError, ChatMessage, ContentPart, streamChat } from '../api.js'
 import { TOOL_SCHEMAS, mcpToolSchemas } from './tools.js'
 import { executeTool, describeTool, runHook, editFilePartial } from './exec.js'
@@ -71,8 +73,8 @@ function logPermission(
 }
 
 /** Hot-reload aturan permission tiap awal turn — tanpa fs.watch (murah, robust). */
-function reloadRules(rt: AgentRuntime): void {
-  const { rules, errors } = loadPermissionRules(rt.cwd)
+async function reloadRules(rt: AgentRuntime): Promise<void> {
+  const { rules, errors } = await loadPermissionRules(rt.cwd)
   const sig = JSON.stringify(rules)
   if (sig === rt.permissions.rulesSig) return
   rt.permissions.rulesSig = sig
@@ -155,7 +157,7 @@ async function executeWithHooks(
   name: string,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const hooks = loadConfig().hooks
+  const hooks = (await loadConfig()).hooks
   if (hooks?.pre_tool_use) {
     const pre = await runHook(hooks.pre_tool_use, name, args, rt.cwd)
     if (!pre.ok) {
@@ -190,7 +192,7 @@ export async function runTurn(rt: AgentRuntime, userInput: string): Promise<Turn
   rt.turnSnapshots.push(new Map())
 
   // Hot-reload aturan permission (bila settings.json berubah sejak turn lalu).
-  reloadRules(rt)
+  await reloadRules(rt)
 
   // System message konteks lampiran (idempotent, survive compaction).
   const droppedAttachments = syncContextMessage(session)
@@ -200,13 +202,13 @@ export async function runTurn(rt: AgentRuntime, userInput: string): Promise<Turn
 
   session.noteUserMessage(userInput)
   session.messages.push({ role: 'user', content: userInput })
-  session.save()
+  await session.save()
 
   for (let step = 0; step < MAX_STEPS; step++) {
     if (rt.abort) {
       emitter.emit('notice', 'Turn dibatalkan user.')
       emitter.emit('done', { completed: false })
-      session.save()
+      await session.save()
       return { completed: false }
     }
 
@@ -235,7 +237,7 @@ export async function runTurn(rt: AgentRuntime, userInput: string): Promise<Turn
       if (signal.aborted) {
         emitter.emit('notice', 'Turn dibatalkan user.')
         emitter.emit('done', { completed: false })
-        session.save()
+        await session.save()
         return { completed: false }
       }
       const msg = err instanceof ApiError ? err.message : (err as Error).message
@@ -274,7 +276,7 @@ export async function runTurn(rt: AgentRuntime, userInput: string): Promise<Turn
     session.messages.push(assistantMsg)
 
     if (result.toolCalls.length === 0) {
-      session.save()
+      await session.save()
       emitter.emit('done', { completed: true })
       return { completed: true }
     }
@@ -331,7 +333,7 @@ export async function runTurn(rt: AgentRuntime, userInput: string): Promise<Turn
           resultImage = r.image
         } else {
           logPermission(rt, name, args, 'ask')
-          const req = rt.permissions.makeRequest(name, args)
+          const req = await rt.permissions.makeRequest(name, args)
           // Daftarkan waiter SEBELUM emit agar jawaban sinkron dari UI tidak hilang.
           const answerPromise = rt.permissions.awaitAnswer(req.id)
           emitter.emit('approval_request', req)
@@ -369,40 +371,40 @@ export async function runTurn(rt: AgentRuntime, userInput: string): Promise<Turn
           ? [{ type: 'text', text: resultContent }, resultImage]
           : resultContent,
       })
-      session.save()
+      await session.save()
     }
   }
 
   emitter.emit('notice', `Turn berhenti: batas ${MAX_STEPS} langkah tercapai.`)
   emitter.emit('done', { completed: true })
-  session.save()
+  await session.save()
   return { completed: true }
 }
 
 /** Helper mode untuk UI slash-commands. Rebuild system message agar prompt sesuai mode. */
-export function setMode(rt: AgentRuntime, mode: string): void {
+export async function setMode(rt: AgentRuntime, mode: string): Promise<void> {
   rt.mode = mode
   rt.session.mode = mode
   if (rt.session.messages[0]?.role === 'system') {
-    rt.session.messages[0] = { role: 'system', content: buildSystemPrompt(rt.cwd, mode, rt.customModes) }
+    rt.session.messages[0] = { role: 'system', content: await buildSystemPrompt(rt.cwd, mode, rt.customModes) }
   }
-  rt.session.save()
+  await rt.session.save()
   rt.emitter.emit('mode_changed', { mode, permissionMode: rt.permissions.mode })
 }
 
-export function setPermissionMode(rt: AgentRuntime, pm: PermissionManager['mode']): void {
+export async function setPermissionMode(rt: AgentRuntime, pm: PermissionManager['mode']): Promise<void> {
   rt.permissions.mode = pm
   rt.session.permissionMode = pm
-  rt.session.save()
+  await rt.session.save()
   rt.emitter.emit('mode_changed', { mode: rt.mode, permissionMode: pm })
 }
 
 /** /new, /new-task: sesi baru dengan mode & permission kini (MCP & runtime tak disentuh). */
-export function startNewSession(rt: AgentRuntime): AgentSession {
-  const s = AgentSession.create(rt.cwd, rt.session.model, buildSystemPrompt(rt.cwd, rt.mode, rt.customModes))
+export async function startNewSession(rt: AgentRuntime): Promise<AgentSession> {
+  const s = AgentSession.create(rt.cwd, rt.session.model, await buildSystemPrompt(rt.cwd, rt.mode, rt.customModes))
   s.mode = rt.mode
   s.permissionMode = rt.permissions.mode
-  s.save()
+  await s.save()
   rt.session = s
   rt.checkpointTurns = []
   rt.turnSnapshots = []

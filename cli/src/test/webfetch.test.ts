@@ -1,6 +1,7 @@
+import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { webFetch } from '../agent/exec.js'
+import { webFetch } from '@topupsaja/core/agent/exec.js'
 
 function htmlResponse(html: string, status = 200, ctype = 'text/html; charset=utf-8'): Response {
   return new Response(html, { status, headers: { 'content-type': ctype } })

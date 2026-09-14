@@ -1,9 +1,10 @@
+import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { PermissionManager, simpleDiff } from '../agent/permission.js'
+import { PermissionManager, simpleDiff } from '@topupsaja/core/agent/permission.js'
 import {
   loadPermissionRules,
   decideRule,
@@ -11,9 +12,9 @@ import {
   derivePatternFromCommand,
   savePatternRule,
   type PermissionRule,
-} from '../agent/rules.js'
+} from '@topupsaja/core/agent/rules.js'
 
-test('permission ask: write/edit/bash tanya, read-only bebas', () => {
+test('permission ask: write/edit/bash tanya, read-only bebas', async () => {
   const pm = new PermissionManager('ask')
   assert.equal(pm.needsAsk('read_file'), false)
   assert.equal(pm.needsAsk('glob'), false)
@@ -25,27 +26,27 @@ test('permission ask: write/edit/bash tanya, read-only bebas', () => {
   assert.equal(pm.needsAsk('task'), false) // subagent read-only
 })
 
-test('permission auto-edit: write/edit otomatis, bash tanya', () => {
+test('permission auto-edit: write/edit otomatis, bash tanya', async () => {
   const pm = new PermissionManager('auto-edit')
   assert.equal(pm.needsAsk('write_file'), false)
   assert.equal(pm.needsAsk('edit_file'), false)
   assert.equal(pm.needsAsk('bash'), true)
 })
 
-test('permission yolo: semua otomatis', () => {
+test('permission yolo: semua otomatis', async () => {
   const pm = new PermissionManager('yolo')
   for (const t of ['bash', 'write_file', 'edit_file', 'read_file']) {
     assert.equal(pm.needsAsk(t), false)
   }
 })
 
-test('allowlist menang atas mode', () => {
+test('allowlist menang atas mode', async () => {
   const pm = new PermissionManager('ask', ['bash'])
   assert.equal(pm.needsAsk('bash'), false)
   assert.equal(pm.needsAsk('write_file'), true)
 })
 
-test('tool MCP diklasifikasi seperti bash (approval + bisa allowlist)', () => {
+test('tool MCP diklasifikasi seperti bash (approval + bisa allowlist)', async () => {
   const pm = new PermissionManager('ask')
   assert.equal(pm.needsAsk('mcp__srv__tool'), true)
   const pmAuto = new PermissionManager('auto-edit')
@@ -56,13 +57,13 @@ test('tool MCP diklasifikasi seperti bash (approval + bisa allowlist)', () => {
   assert.equal(pmAllow.needsAsk('mcp__srv__tool'), false)
 })
 
-test('simpleDiff: menandai baris - dan +', () => {
+test('simpleDiff: menandai baris - dan +', async () => {
   const d = simpleDiff('a\nb\nc', 'a\nx\nc')
   assert.ok(d.split('\n').some((l) => l.startsWith('- b')))
   assert.ok(d.split('\n').some((l) => l.startsWith('+ x')))
 })
 
-test('simpleDiff: identik → kosong', () => {
+test('simpleDiff: identik → kosong', async () => {
   assert.equal(simpleDiff('sama', 'sama'), '')
 })
 
@@ -72,7 +73,7 @@ function pm(mode: ConstructorParameters<typeof PermissionManager>[0], rules: Per
   return new PermissionManager(mode, [], rules, '/proj')
 }
 
-test('decide: precedence deny > ask > allow', () => {
+test('decide: precedence deny > ask > allow', async () => {
   const rules: PermissionRule[] = [
     { tool: 'bash', pattern: 'npm *', action: 'allow', origin: 'project' },
     { tool: 'bash', pattern: 'npm *', action: 'ask', origin: 'project' },
@@ -85,7 +86,7 @@ test('decide: precedence deny > ask > allow', () => {
   assert.equal(d2, 'ask')
 })
 
-test('decide: rule allow bypass approval untuk command risky (mode ask)', () => {
+test('decide: rule allow bypass approval untuk command risky (mode ask)', async () => {
   const rules: PermissionRule[] = [
     { tool: 'bash', pattern: 'npm *', action: 'allow', origin: 'project' },
   ]
@@ -93,14 +94,14 @@ test('decide: rule allow bypass approval untuk command risky (mode ask)', () => 
   assert.equal(pm('ask', rules).decide('bash', { command: 'npm install' }, { readOnlyMode: false }), 'allow')
 })
 
-test('decide: rule allow TIDAK membuka classifyBash deny', () => {
+test('decide: rule allow TIDAK membuka classifyBash deny', async () => {
   const rules: PermissionRule[] = [
     { tool: 'bash', pattern: '*', action: 'allow', origin: 'project' },
   ]
   assert.equal(pm('yolo', rules).decide('bash', { command: 'sudo echo hi' }, { readOnlyMode: false }), 'deny')
 })
 
-test('decide: rule ask memaksa approval walau mode yolo', () => {
+test('decide: rule ask memaksa approval walau mode yolo', async () => {
   const rules: PermissionRule[] = [
     { tool: 'bash', pattern: 'curl *', action: 'ask', origin: 'project' },
   ]
@@ -109,7 +110,7 @@ test('decide: rule ask memaksa approval walau mode yolo', () => {
   assert.equal(pm('yolo', rules).decide('bash', { command: 'make build' }, { readOnlyMode: false }), 'allow')
 })
 
-test('decide: rule TIDAK menimpa gate read-only mode', () => {
+test('decide: rule TIDAK menimpa gate read-only mode', async () => {
   const rules: PermissionRule[] = [
     { tool: 'write_file', pattern: '*', action: 'allow', origin: 'project' },
     { tool: 'bash', pattern: '*', action: 'allow', origin: 'project' },
@@ -121,7 +122,7 @@ test('decide: rule TIDAK menimpa gate read-only mode', () => {
   assert.equal(manager.decide('ask_user', {}, { readOnlyMode: true }), 'allow')
 })
 
-test('decide: deny rule pada write_file path glob', () => {
+test('decide: deny rule pada write_file path glob', async () => {
   const rules: PermissionRule[] = [
     { tool: 'write_file', pattern: '*.env*', action: 'deny', origin: 'project' },
   ]
@@ -141,7 +142,7 @@ test('decide: deny rule pada write_file path glob', () => {
   assert.equal(n.decide('write_file', { path: 'src/a.ts' }, { readOnlyMode: false }), 'allow')
 })
 
-test('decide: perilaku mode lama tanpa rule tetap sama', () => {
+test('decide: perilaku mode lama tanpa rule tetap sama', async () => {
   const askPm = pm('ask')
   assert.equal(askPm.decide('write_file', { path: 'a.ts' }, { readOnlyMode: false }), 'ask')
   assert.equal(askPm.decide('bash', { command: 'npm install' }, { readOnlyMode: false }), 'ask')
@@ -154,7 +155,7 @@ test('decide: perilaku mode lama tanpa rule tetap sama', () => {
   assert.equal(auto.decide('bash', { command: 'make x' }, { readOnlyMode: false }), 'ask')
 })
 
-test('decide: allowlist per-tool masih jalan, deny rule menang atas allowlist', () => {
+test('decide: allowlist per-tool masih jalan, deny rule menang atas allowlist', async () => {
   const rules: PermissionRule[] = [
     { tool: 'bash', pattern: 'rm *', action: 'deny', origin: 'project' },
   ]
@@ -172,7 +173,7 @@ function writeSettings(home: string, proj: string, globalPerms: unknown, project
   fs.writeFileSync(path.join(proj, '.tsa', 'settings.json'), JSON.stringify({ permissions: projectPerms }))
 }
 
-test('loadPermissionRules: global + project termuat, project setelah global (tie → project)', () => {
+test('loadPermissionRules: global + project termuat, project setelah global (tie → project)', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-rules-'))
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-rules-p-'))
   const oldHome = process.env.HOME
@@ -184,7 +185,7 @@ test('loadPermissionRules: global + project termuat, project setelah global (tie
       [{ tool: 'bash', pattern: 'npm *', action: 'allow' }],
       [{ tool: 'bash', pattern: 'npm *', action: 'ask' }]
     )
-    const { rules, errors } = loadPermissionRules(proj)
+    const { rules, errors } = await loadPermissionRules(proj)
     assert.deepEqual(errors, [])
     assert.equal(rules.length, 2)
     assert.equal(rules[0].origin, 'global')
@@ -200,7 +201,7 @@ test('loadPermissionRules: global + project termuat, project setelah global (tie
       [{ tool: 'write_file', pattern: '*.env*', action: 'deny' }],
       [{ tool: 'write_file', pattern: '*', action: 'allow' }]
     )
-    const again = loadPermissionRules(proj)
+    const again = await loadPermissionRules(proj)
     assert.equal(again.errors.length, 0)
     assert.equal(decideRule(again.rules, 'write_file', { path: '.env' }, proj), 'deny')
   } finally {
@@ -211,7 +212,7 @@ test('loadPermissionRules: global + project termuat, project setelah global (tie
   }
 })
 
-test('loadPermissionRules: rule invalid di-skip + error dikumpulkan, file hilang → kosong', () => {
+test('loadPermissionRules: rule invalid di-skip + error dikumpulkan, file hilang → kosong', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-rules-bad-'))
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-rules-bad-p-'))
   const oldHome = process.env.HOME
@@ -229,20 +230,20 @@ test('loadPermissionRules: rule invalid di-skip + error dikumpulkan, file hilang
         'bukan object',
       ]
     )
-    const { rules, errors } = loadPermissionRules(proj)
+    const { rules, errors } = await loadPermissionRules(proj)
     assert.equal(rules.length, 1)
     assert.equal(rules[0].action, 'allow')
     assert.equal(errors.length, 5)
     // JSON rusak → hanya error, tanpa rule, tanpa throw
     fs.writeFileSync(path.join(proj, '.tsa', 'settings.json'), '{belum selesai')
-    const broken = loadPermissionRules(proj)
+    const broken = await loadPermissionRules(proj)
     assert.equal(broken.rules.length, 0)
     assert.ok(broken.errors.length >= 1)
 
     // tanpa file sama sekali → kosong tanpa error
     fs.rmSync(path.join(home, '.topupsaja'), { recursive: true, force: true })
     fs.rmSync(path.join(proj, '.tsa'), { recursive: true, force: true })
-    const empty = loadPermissionRules(proj)
+    const empty = await loadPermissionRules(proj)
     assert.deepEqual(empty, { rules: [], errors: [] })
   } finally {
     if (oldHome === undefined) delete process.env.HOME
@@ -252,7 +253,7 @@ test('loadPermissionRules: rule invalid di-skip + error dikumpulkan, file hilang
   }
 })
 
-test('rulesSummary: kosong & berisi count + contoh', () => {
+test('rulesSummary: kosong & berisi count + contoh', async () => {
   assert.equal(rulesSummary([]), 'tanpa aturan granular')
   const s = rulesSummary([
     { tool: 'bash', pattern: 'npm *', action: 'ask', origin: 'project' },
@@ -269,7 +270,7 @@ test('rulesSummary: kosong & berisi count + contoh', () => {
 
 // ── Precedence v2: deny absolut > spesifisitas > ask > allow; tie → project ──
 
-test('precedence v2: allow spesifik menimpa ask luas', () => {
+test('precedence v2: allow spesifik menimpa ask luas', async () => {
   const rules: PermissionRule[] = [
     { tool: 'bash', pattern: '*', action: 'ask', origin: 'project' },
     { tool: 'bash', pattern: 'npm install*', action: 'allow', origin: 'project' },
@@ -280,7 +281,7 @@ test('precedence v2: allow spesifik menimpa ask luas', () => {
   assert.equal(decideRule(rules, 'bash', { command: 'make x' }, '/proj'), 'ask')
 })
 
-test('precedence v2: ask spesifik menimpa allow luas', () => {
+test('precedence v2: ask spesifik menimpa allow luas', async () => {
   const rules: PermissionRule[] = [
     { tool: 'bash', pattern: 'npm *', action: 'allow', origin: 'project' },
     { tool: 'bash', pattern: 'npm publish*', action: 'ask', origin: 'project' },
@@ -289,7 +290,7 @@ test('precedence v2: ask spesifik menimpa allow luas', () => {
   assert.equal(decideRule(rules, 'bash', { command: 'npm install' }, '/proj'), 'allow')
 })
 
-test('precedence v2: deny absolut menang dari rule spesifik mana pun', () => {
+test('precedence v2: deny absolut menang dari rule spesifik mana pun', async () => {
   const rules: PermissionRule[] = [
     { tool: 'bash', pattern: 'npm install *very*specific*', action: 'allow', origin: 'project' },
     { tool: 'bash', pattern: '*', action: 'deny', origin: 'project' },
@@ -297,7 +298,7 @@ test('precedence v2: deny absolut menang dari rule spesifik mana pun', () => {
   assert.equal(decideRule(rules, 'bash', { command: 'npm install very specific thing' }, '/proj'), 'deny')
 })
 
-test('precedence v2: tie (pattern identik) → ask > allow', () => {
+test('precedence v2: tie (pattern identik) → ask > allow', async () => {
   const rules: PermissionRule[] = [
     { tool: 'bash', pattern: 'npm *', action: 'allow', origin: 'project' },
     { tool: 'bash', pattern: 'npm *', action: 'ask', origin: 'project' },
@@ -305,7 +306,7 @@ test('precedence v2: tie (pattern identik) → ask > allow', () => {
   assert.equal(decideRule(rules, 'bash', { command: 'npm x' }, '/proj'), 'ask')
 })
 
-test('precedence v2: tie penuh → project > global', () => {
+test('precedence v2: tie penuh → project > global', async () => {
   const rules: PermissionRule[] = [
     { tool: 'bash', pattern: 'npm *', action: 'allow', origin: 'global' },
     { tool: 'bash', pattern: 'npm *', action: 'deny', origin: 'project' },
@@ -313,7 +314,7 @@ test('precedence v2: tie penuh → project > global', () => {
   assert.equal(decideRule(rules, 'bash', { command: 'npm x' }, '/proj'), 'deny')
 })
 
-test('precedence v2: spesifisitas dihitung dari tool + pattern', () => {
+test('precedence v2: spesifisitas dihitung dari tool + pattern', async () => {
   // tool 'mcp__srv__tool' (14 literal) + pattern '*' vs tool '*' + pattern panjang
   const rules: PermissionRule[] = [
     { tool: 'mcp__srv__tool', pattern: '*', action: 'allow', origin: 'project' },
@@ -325,7 +326,7 @@ test('precedence v2: spesifisitas dihitung dari tool + pattern', () => {
 
 // ── derivePatternFromCommand & savePatternRule ──
 
-test('derivePatternFromCommand: prefix tanpa spasi sebelum *', () => {
+test('derivePatternFromCommand: prefix tanpa spasi sebelum *', async () => {
   assert.equal(derivePatternFromCommand('npm install'), 'npm install*')
   assert.equal(derivePatternFromCommand('npm install foo'), 'npm install*')
   assert.equal(derivePatternFromCommand('npm run build --x'), 'npm run*')
@@ -335,24 +336,24 @@ test('derivePatternFromCommand: prefix tanpa spasi sebelum *', () => {
   assert.equal(derivePatternFromCommand('   '), null)
 })
 
-test('savePatternRule: tulis project settings.json, dedup exact, fallback global', () => {
+test('savePatternRule: tulis project settings.json, dedup exact, fallback global', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-pattern-h-'))
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-pattern-p-'))
   const oldHome = process.env.HOME
   process.env.HOME = home
   try {
-    const file = savePatternRule(proj, 'bash', 'npm install*')
+    const file = await savePatternRule(proj, 'bash', 'npm install*')
     assert.ok(file)
     const saved = JSON.parse(fs.readFileSync(file!, 'utf8'))
     assert.deepEqual(saved.permissions, [{ tool: 'bash', pattern: 'npm install*', action: 'allow' }])
     // dedup: simpan lagi → tidak bertambah
-    savePatternRule(proj, 'bash', 'npm install*')
+    await savePatternRule(proj, 'bash', 'npm install*')
     const again = JSON.parse(fs.readFileSync(file!, 'utf8'))
     assert.equal(again.permissions.length, 1)
     // project tidak bisa ditulis (settings.json jadi direktori) → fallback global
     fs.rmSync(path.join(proj, '.tsa'), { recursive: true, force: true })
     fs.mkdirSync(path.join(proj, '.tsa', 'settings.json'), { recursive: true })
-    const fallback = savePatternRule(proj, 'bash', 'yarn add*')
+    const fallback = await savePatternRule(proj, 'bash', 'yarn add*')
     assert.ok(fallback)
     assert.ok(fallback!.includes('.topupsaja'))
     const globalSaved = JSON.parse(fs.readFileSync(fallback!, 'utf8'))
@@ -367,7 +368,7 @@ test('savePatternRule: tulis project settings.json, dedup exact, fallback global
 
 // ── answer(): warning always ter-bayangi rule + alwaysPattern ──
 
-test('answer(): always di-bayangi rule ask → warning, allowlist tidak ditulis', () => {
+test('answer(): always di-bayangi rule ask → warning, allowlist tidak ditulis', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-ans-h-'))
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-ans-p-'))
   const oldHome = process.env.HOME
@@ -379,7 +380,7 @@ test('answer(): always di-bayangi rule ask → warning, allowlist tidak ditulis'
     const pm = new PermissionManager('ask', [], rules, proj)
     const id = pm.newRequestId()
     void pm.awaitAnswer(id)
-    const warning = pm.answer(id, { approved: true, always: true }, 'bash', { command: 'npm publish' })
+    const warning = await pm.answer(id, { approved: true, always: true }, 'bash', { command: 'npm publish' })
     assert.ok(warning)
     assert.match(warning!, /tidak disimpan/)
     assert.equal(pm.allowlist.has('bash'), false)
@@ -388,7 +389,7 @@ test('answer(): always di-bayangi rule ask → warning, allowlist tidak ditulis'
     const pm2 = new PermissionManager('ask', [], rules2, proj)
     const id2 = pm2.newRequestId()
     void pm2.awaitAnswer(id2)
-    const ok = pm2.answer(id2, { approved: true, always: true }, 'bash', { command: 'npm install' })
+    const ok = await pm2.answer(id2, { approved: true, always: true }, 'bash', { command: 'npm install' })
     assert.equal(ok, null)
     assert.equal(pm2.allowlist.has('bash'), true)
   } finally {
@@ -399,7 +400,7 @@ test('answer(): always di-bayangi rule ask → warning, allowlist tidak ditulis'
   }
 })
 
-test('answer(): alwaysPattern bash → rule allow tersimpan di project settings', () => {
+test('answer(): alwaysPattern bash → rule allow tersimpan di project settings', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-ap-h-'))
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-ap-p-'))
   const oldHome = process.env.HOME
@@ -408,7 +409,7 @@ test('answer(): alwaysPattern bash → rule allow tersimpan di project settings'
     const pm = new PermissionManager('ask', [], [], proj)
     const id = pm.newRequestId()
     void pm.awaitAnswer(id)
-    const msg = pm.answer(id, { approved: true, alwaysPattern: true }, 'bash', { command: 'npm run build' })
+    const msg = await pm.answer(id, { approved: true, alwaysPattern: true }, 'bash', { command: 'npm run build' })
     assert.ok(msg)
     assert.match(msg!, /Rule allow dibuat/)
     assert.match(msg!, /npm run\*/)
@@ -422,7 +423,7 @@ test('answer(): alwaysPattern bash → rule allow tersimpan di project settings'
   }
 })
 
-test('decide: deny rule pada read_file path .env (tool baca) → deny', () => {
+test('decide: deny rule pada read_file path .env (tool baca) → deny', async () => {
   const rules: PermissionRule[] = [
     { tool: 'read_file', pattern: '*.env*', action: 'deny', origin: 'project' },
   ]
@@ -432,7 +433,7 @@ test('decide: deny rule pada read_file path .env (tool baca) → deny', () => {
   assert.equal(m.decide('read_file', { path: 'a.ts' }, { readOnlyMode: false }), 'allow')
 })
 
-test('decide: deny rule web_fetch URL (block localhost)', () => {
+test('decide: deny rule web_fetch URL (block localhost)', async () => {
   const rules: PermissionRule[] = [
     { tool: 'web_fetch', pattern: '**localhost**', action: 'deny', origin: 'project' },
   ]

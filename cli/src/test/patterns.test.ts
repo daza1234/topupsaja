@@ -1,6 +1,7 @@
+import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { globMatch } from '../agent/patterns.js'
+import { globMatch } from '@topupsaja/core/agent/patterns.js'
 
 test('glob: "npm *" match command berawalan npm, miss selain itu', () => {
   assert.equal(globMatch('npm *', 'npm install'), true)

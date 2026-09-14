@@ -1,5 +1,5 @@
-import fs from 'node:fs'
-import path from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'pathe'
+import { getHost } from '../host.js'
 import { simpleDiff, truncateForPreview } from './permission.js'
 import type { AgentRuntime } from './runtime.js'
 
@@ -10,7 +10,7 @@ const MAX_TURN_SNAPSHOT_BYTES = 4_000_000
 
 /** Path absolut → relatif-normalisasi terhadap cwd. */
 export function relPath(cwd: string, absOrRel: string): string {
-  return path.relative(cwd, path.resolve(cwd, absOrRel)).split(path.sep).join('/')
+  return relative(cwd, resolve(cwd, absOrRel)).split(sep).join('/')
 }
 
 /**
@@ -19,17 +19,17 @@ export function relPath(cwd: string, absOrRel: string): string {
  * - snapshot pre-mutasi per turn (in-memory) untuk /undo yang akurat.
  * Return skipped path bila file terlalu besar untuk di-snapshot.
  */
-export function stagePreState(rt: AgentRuntime, rel: string): string | undefined {
-  const abs = path.resolve(rt.cwd, rel)
+export async function stagePreState(rt: AgentRuntime, rel: string): Promise<string | undefined> {
+  const abs = resolve(rt.cwd, rel)
   let content: string | null = null
   let tooBig = false
   try {
-    const stat = fs.statSync(abs)
+    const stat = await getHost().fs.stat(abs)
     if (stat.isFile()) {
       if (stat.size > MAX_SNAPSHOT_BYTES) {
         tooBig = true
       } else {
-        content = fs.readFileSync(abs, 'utf8')
+        content = await getHost().fs.readFile(abs, 'utf8')
       }
     }
   } catch {
@@ -59,16 +59,16 @@ export function markTouched(rt: AgentRuntime, rel: string): void {
   if (current && !current.includes(rel)) current.push(rel)
 }
 
-function restoreContent(abs: string, content: string | null): void {
+async function restoreContent(abs: string, content: string | null): Promise<void> {
   if (content === null) {
     try {
-      fs.unlinkSync(abs)
+      await getHost().fs.unlink(abs)
     } catch {
       /* sudah tidak ada */
     }
   } else {
-    fs.mkdirSync(path.dirname(abs), { recursive: true })
-    fs.writeFileSync(abs, content, 'utf8')
+    await getHost().fs.mkdir(dirname(abs), { recursive: true })
+    await getHost().fs.writeFile(abs, content, 'utf8')
   }
 }
 
@@ -77,7 +77,7 @@ function restoreContent(abs: string, content: string | null): void {
  * sebelum turn itu (snapshot in-memory; fallback = baseline persist).
  * Return daftar path yang dipulihkan.
  */
-export function undoLastTurn(rt: AgentRuntime): string[] {
+export async function undoLastTurn(rt: AgentRuntime): Promise<string[]> {
   const touched = rt.checkpointTurns.pop()
   const snaps = rt.turnSnapshots.pop()
   if (!touched || touched.length === 0) return []
@@ -92,13 +92,13 @@ export function undoLastTurn(rt: AgentRuntime): string[] {
       delete rt.session.checkpoints[rel]
     }
     try {
-      restoreContent(path.resolve(rt.cwd, rel), pre)
+      await restoreContent(resolve(rt.cwd, rel), pre)
       restored.push(rel)
     } catch {
       /* gagal restore satu file — lanjut */
     }
   }
-  rt.session.save()
+  await rt.session.save()
   return restored
 }
 
@@ -106,15 +106,15 @@ export function undoLastTurn(rt: AgentRuntime): string[] {
  * /diff: diff kumulatif baseline→kini untuk semua file yang punya checkpoint.
  * Return teks siap tampil (sudah di-truncate per file).
  */
-export function diffCheckpoints(rt: AgentRuntime): string {
+export async function diffCheckpoints(rt: AgentRuntime): Promise<string> {
   const entries = Object.entries(rt.session.checkpoints)
   if (entries.length === 0) return 'Belum ada file yang dimutasi sejak sesi dimulai.'
   const out: string[] = []
   for (const [rel, cp] of entries) {
-    const abs = path.resolve(rt.cwd, rel)
+    const abs = resolve(rt.cwd, rel)
     let now: string | null = null
     try {
-      now = fs.readFileSync(abs, 'utf8')
+      now = await getHost().fs.readFile(abs, 'utf8')
     } catch {
       now = null
     }

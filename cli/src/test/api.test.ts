@@ -1,6 +1,7 @@
+import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { streamChat, withRetry, isRetryableError, ApiError } from '../api.js'
+import { streamChat, withRetry, isRetryableError, ApiError } from '@topupsaja/core/api.js'
 
 // Env minimal agar config module tidak error.
 process.env.TOPUPSAJA_API_KEY = process.env.TOPUPSAJA_API_KEY ?? 'sk-ts-test'

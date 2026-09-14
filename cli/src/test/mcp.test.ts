@@ -1,9 +1,10 @@
+import '../bootstrap.js'
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { McpConnection, loadMcpConfig, parseMcpToolName } from '../mcp/client.js'
+import { McpConnection, loadMcpConfig, parseMcpToolName } from '@topupsaja/core/mcp/client.js'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tsa-mcp-'))
 
@@ -44,7 +45,7 @@ test('parseMcpToolName: mcp__<server>__<tool>', () => {
   assert.equal(parseMcpToolName('mcp__onlyserver'), null)
 })
 
-test('loadMcpConfig: project config terbaca, spec tidak valid di-skip', () => {
+test('loadMcpConfig: project config terbaca, spec tidak valid di-skip', async () => {
   fs.mkdirSync(path.join(tmp, '.tsa'), { recursive: true })
   fs.writeFileSync(
     path.join(tmp, '.tsa', 'mcp.json'),
@@ -55,7 +56,7 @@ test('loadMcpConfig: project config terbaca, spec tidak valid di-skip', () => {
       },
     })
   )
-  const cfg = loadMcpConfig(tmp)
+  const cfg = await loadMcpConfig(tmp)
   assert.ok(cfg.echo, 'server echo harus ada')
   assert.equal(cfg.echo.command, 'node')
   assert.equal(cfg.bad, undefined)

@@ -1,6 +1,5 @@
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import { join } from 'pathe'
+import { getHost } from './host.js'
 
 export type PermissionMode = 'ask' | 'auto-edit' | 'yolo'
 
@@ -26,12 +25,16 @@ export interface Config {
 
 export const DEFAULT_BASE_URL = 'https://api.topupsaja.com'
 
-const CONFIG_DIR = path.join(os.homedir(), '.topupsaja')
-const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
+function configDir(): string {
+  return join(getHost().homedir(), '.topupsaja')
+}
+function configFile(): string {
+  return join(configDir(), 'config.json')
+}
 
-export function loadConfig(): Config {
+export async function loadConfig(): Promise<Config> {
   try {
-    const raw = fs.readFileSync(CONFIG_FILE, 'utf8')
+    const raw = await getHost().fs.readFile(configFile(), 'utf8')
     return JSON.parse(raw) as Config
   } catch {
     return {}
@@ -39,27 +42,27 @@ export function loadConfig(): Config {
 }
 
 /** Simpan config (merge) dengan permission 0600. */
-export function saveConfig(patch: Partial<Config>): void {
-  const merged = { ...loadConfig(), ...patch }
-  fs.mkdirSync(CONFIG_DIR, { recursive: true })
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2) + '\n', { mode: 0o600 })
+export async function saveConfig(patch: Partial<Config>): Promise<void> {
+  const merged = { ...(await loadConfig()), ...patch }
+  await getHost().fs.mkdir(configDir(), { recursive: true })
+  await getHost().fs.writeFile(configFile(), JSON.stringify(merged, null, 2) + '\n', { mode: 0o600 })
   try {
-    fs.chmodSync(CONFIG_FILE, 0o600)
+    await getHost().fs.chmod(configFile(), 0o600)
   } catch {
     /* ignore (windows) */
   }
 }
 
 /** Env TOPUPSAJA_API_KEY selalu menang atas file config. */
-export function getApiKey(): string | undefined {
-  return process.env.TOPUPSAJA_API_KEY || loadConfig().api_key || undefined
+export async function getApiKey(): Promise<string | undefined> {
+  return getHost().env.TOPUPSAJA_API_KEY || (await loadConfig()).api_key || undefined
 }
 
 /** Env TOPUPSAJA_API_URL > config > default. */
-export function getBaseUrl(): string {
-  const cfg = loadConfig()
+export async function getBaseUrl(): Promise<string> {
+  const cfg = await loadConfig()
   return (
-    process.env.TOPUPSAJA_API_URL ||
+    getHost().env.TOPUPSAJA_API_URL ||
     cfg.base_url ||
     DEFAULT_BASE_URL
   ).replace(/\/+$/, '')

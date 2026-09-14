@@ -1,7 +1,6 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import { join, resolve } from 'pathe'
+import { getHost } from '../host.js'
+import type { HostProcess } from '../host.js'
 import { ApiError } from '../api.js'
 
 export interface McpServerSpec {
@@ -96,7 +95,7 @@ export class McpConnection {
   error = ''
   tools: McpToolDef[] = []
   prompts: McpPromptDef[] = []
-  private proc: ChildProcess | null = null
+  private proc: HostProcess | null = null
   private seq = 0
   private pending = new Map<number, Pending>()
   private buffer = ''
@@ -127,7 +126,7 @@ export class McpConnection {
     // notifikasi / response tanpa pending — abaikan
   }
 
-  private attach(proc: ChildProcess): void {
+  private attach(proc: HostProcess): void {
     proc.stdout!.setEncoding('utf8')
     proc.stdout!.on('data', (chunk: string) => {
       this.buffer += chunk
@@ -179,9 +178,9 @@ export class McpConnection {
 
   /** Spawn + initialize + tools/list. */
   async connect(cwd: string): Promise<void> {
-    this.proc = spawn(this.spec.command, this.spec.args ?? [], {
+    this.proc = getHost().exec.spawn(this.spec.command, this.spec.args ?? [], {
       cwd,
-      env: { ...process.env, ...(this.spec.env ?? {}) },
+      env: { ...getHost().env, ...(this.spec.env ?? {}) },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     this.attach(this.proc)
@@ -263,15 +262,15 @@ export class McpConnection {
 }
 
 /** Baca config MCP: ~/.topupsaja/mcp.json lalu <cwd>/.tsa/mcp.json (project menang). */
-export function loadMcpConfig(cwd: string): Record<string, McpServerSpec> {
+export async function loadMcpConfig(cwd: string): Promise<Record<string, McpServerSpec>> {
   const files = [
-    path.join(os.homedir(), '.topupsaja', 'mcp.json'),
-    path.join(cwd, '.tsa', 'mcp.json'),
+    join(getHost().homedir(), '.topupsaja', 'mcp.json'),
+    join(cwd, '.tsa', 'mcp.json'),
   ]
   const merged: Record<string, McpServerSpec> = {}
   for (const f of files) {
     try {
-      const raw = JSON.parse(fs.readFileSync(f, 'utf8')) as {
+      const raw = JSON.parse(await getHost().fs.readFile(f, 'utf8')) as {
         mcpServers?: Record<string, McpServerSpec>
       }
       for (const [name, spec] of Object.entries(raw.mcpServers ?? {})) {
@@ -289,7 +288,7 @@ export async function connectMcpServers(
   cwd: string,
   log: (msg: string) => void = console.error
 ): Promise<McpConnection[]> {
-  const specs = loadMcpConfig(cwd)
+  const specs = await loadMcpConfig(cwd)
   const conns: McpConnection[] = []
   for (const [name, spec] of Object.entries(specs)) {
     const conn = new McpConnection(name, spec)

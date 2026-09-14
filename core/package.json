@@ -1,0 +1,25 @@
+{
+  "name": "@topupsaja/core",
+  "version": "0.1.0",
+  "description": "Core agentic runtime TopUpSaja — host-agnostic (CLI & desktop webview)",
+  "type": "module",
+  "exports": {
+    "./*": "./dist/*"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "ignore": "^7.0.9",
+    "pathe": "^1.1.2",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.3"
+  }
+}

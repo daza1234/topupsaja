@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AgentRuntime } from '../agent/runtime.js'
-import type { AskUserRequest } from '../agent/runtime.js'
-import type { TodoItem } from '../storage/todo.js'
-import type { ApprovalRequest } from '../agent/permission.js'
-import type { PermissionMode } from '../config.js'
+import type { AgentRuntime } from '@topupsaja/core/agent/runtime.js'
+import type { AskUserRequest } from '@topupsaja/core/agent/runtime.js'
+import type { TodoItem } from '@topupsaja/core/storage/todo.js'
+import type { ApprovalRequest } from '@topupsaja/core/agent/permission.js'
+import type { PermissionMode } from '@topupsaja/core/config.js'
 
 export type Block =
   | { kind: 'user'; text: string }
