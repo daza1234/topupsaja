@@ -107,7 +107,7 @@ export default async function adminRoutes(app) {
   /** GET /api/admin/models — katalog + cost internal */
   app.get('/api/admin/models', async () => {
     return query(
-      `select or_model_id, alias, tier, m_in, m_out, m_cache,
+      `select or_model_id, alias, family, tier, m_in, m_out, m_cache,
               cost_in_usd, cost_out_usd, context_window, is_active,
               fail_count, auto_disabled_at, synced_at
        from model_pricing order by tier, alias`

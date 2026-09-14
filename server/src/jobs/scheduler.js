@@ -4,13 +4,30 @@ import { watchUpstream } from './watchUpstream.js'
 import { expireTopups } from './expireTopups.js'
 import { probeDisabled } from './probeDisabled.js'
 import { purgeSessions } from './purgeSessions.js'
+import { sendTelegramAlert } from '../lib/telegram.js'
+
+// Throttle alert Telegram: maks 1 pesan gagal per jam per job
+const lastAlertAt = new Map() // name → timestamp alert gagal terakhir
+const failing = new Set() // nama job yang sedang gagal
 
 function safe(name, fn) {
   return async () => {
     try {
       await fn()
+      if (failing.has(name)) {
+        failing.delete(name)
+        await sendTelegramAlert(`✅ Cron job pulih: <b>${name}</b>`)
+      }
     } catch (err) {
-      console.error(`[${name}] error:`, err.message)
+      console.error(`[${name}] error:`, err?.message ?? String(err))
+      const now = Date.now()
+      const detail = String(err?.message ?? err)
+      if (now - (lastAlertAt.get(name) ?? 0) >= 60 * 60 * 1000) {
+        lastAlertAt.set(name, now)
+        failing.add(name)
+        // err.message bisa berisi karakter mentah; HTML parse mode aktif, kirim teks polos
+        await sendTelegramAlert(`🚨 Cron job gagal: <b>${name}</b> — ${detail}`)
+      }
     }
   }
 }

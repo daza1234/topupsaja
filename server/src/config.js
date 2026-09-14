@@ -18,7 +18,7 @@ export const config = {
   // Allowlist origin untuk CORS (dashboard web). Kosong di env → default prod+dev.
   corsOrigins: (
     process.env.CORS_ORIGINS ??
-    'https://topupsaja.com,https://ai.topupsaja.com,https://api.topupsaja.com,http://localhost:3001,http://localhost:3000'
+    'https://topupsaja.com,https://ai.topupsaja.com,https://api.topupsaja.com,http://localhost:3001,http://localhost:3000,tauri://localhost,http://tauri.localhost'
   )
     .split(',')
     .map((s) => s.trim())
@@ -76,6 +76,7 @@ export const config = {
 
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID ?? '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
     tokenInfoUrl: process.env.GOOGLE_TOKENINFO_URL ?? 'https://oauth2.googleapis.com/tokeninfo',
   },
 

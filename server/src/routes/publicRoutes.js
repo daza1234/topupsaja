@@ -6,7 +6,8 @@ export default async function publicRoutes(app) {
   app.get('/api/catalog', async () => {
     const rows = await query(
       `select alias, display_name, family, context_window, max_output,
-              m_in, m_out, m_cache, tier, upstream_status
+              m_in, m_out, m_cache, tier, upstream_status,
+              supports_vision, input_modalities, output_modalities, tags
        from model_pricing where is_active = true
        order by (alias like '%fable%') desc, tier, alias`
     )
