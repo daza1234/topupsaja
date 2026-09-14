@@ -16,6 +16,7 @@ import { saveModel, type ModelInfo } from "./lib/chat";
 import {
   bootstrapAgent,
   loadSavedFolder,
+  loadRecentFolders,
   saveFolder,
   answerApproval,
   answerAskUser,
@@ -45,6 +46,9 @@ import { getHost } from "@topupsaja/core/host.js";
 import type { TodoItem } from "@topupsaja/core/storage/todo.js";
 import type { PermissionMode } from "@topupsaja/core/config.js";
 import type { ChatMessage } from "@topupsaja/core/api.js";
+import Sidebar from "./components/Sidebar";
+import Composer, { PERMISSION_MODES } from "./components/Composer";
+import { baseName, fmtNum } from "./components/format";
 
 type Status = "checking" | "login" | "main";
 
@@ -61,30 +65,6 @@ interface StatusInfo {
   creditsUsed?: number;
   balance?: number;
   contextPct?: number;
-}
-
-const PERMISSION_MODES: { value: PermissionMode; label: string }[] = [
-  { value: "ask", label: "ask" },
-  { value: "auto-edit", label: "auto-edit" },
-  { value: "yolo", label: "yolo" },
-];
-
-const COMMANDS = [
-  { cmd: "/new", desc: "Sesi baru" },
-  { cmd: "/resume", desc: "Lanjutkan sesi tersimpan" },
-  { cmd: "/mode ", desc: "Ganti mode (code/architect/ask/test/custom)" },
-  { cmd: "/permission ", desc: "Permission ask/auto-edit/yolo" },
-  { cmd: "/model ", desc: "Ganti model" },
-  { cmd: "/undo", desc: "Batalkan perubahan turn terakhir" },
-  { cmd: "/diff", desc: "Diff checkpoint turn terakhir" },
-];
-
-function fmtNum(n: number): string {
-  return new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 }).format(n);
-}
-
-function baseName(p: string): string {
-  return p.split("/").filter(Boolean).pop() ?? p;
 }
 
 /** Ekstrak teks dari ChatMessage (content string atau array part) — skip tool/system. */
@@ -122,7 +102,7 @@ function ToolCard({ item }: { item: Extract<Item, { kind: "tool" }> }) {
   return (
     <details className="self-stretch rounded-lg border border-[#e4e4e0] bg-white px-3 py-2 text-sm">
       <summary className="cursor-pointer list-none flex items-center gap-2">
-        <span className="font-medium text-[#1f2328]">{item.name}</span>
+        <span className="font-medium text-[#1f2328]">⚙ {item.name}</span>
         <span className="truncate text-zinc-500">{item.desc}</span>
         {!item.result && <span className="ml-auto h-2 w-2 animate-pulse rounded-full bg-zinc-400" />}
         {item.result && (
@@ -131,7 +111,12 @@ function ToolCard({ item }: { item: Extract<Item, { kind: "tool" }> }) {
           </span>
         )}
       </summary>
-      {item.result && <div className="mt-2">{<ToolOutput output={item.result.output} />}</div>}
+      {item.result && (
+        <div className="mt-2">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">Output — {item.name}</p>
+          <ToolOutput output={item.result.output} />
+        </div>
+      )}
     </details>
   );
 }
@@ -143,7 +128,11 @@ function DiffPreview({ preview }: { preview: string }) {
         <div
           key={i}
           className={
-            line.startsWith("+") ? "text-green-600" : line.startsWith("-") ? "text-red-500" : "text-zinc-500"
+            line.startsWith("+")
+              ? "bg-green-50 text-green-700"
+              : line.startsWith("-")
+                ? "bg-red-50 text-red-600"
+                : "text-zinc-500"
           }
         >
           {line}
@@ -280,48 +269,6 @@ function AskUserModal({ req, onAnswer }: { req: AskUserRequest; onAnswer: (ans: 
   );
 }
 
-function SessionsModal({
-  metas,
-  loading,
-  error,
-  onResume,
-  onClose,
-}: {
-  metas: SessionMeta[];
-  loading: boolean;
-  error: string;
-  onResume: (id: string) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
-      <div
-        className="max-h-[70vh] w-full max-w-xl overflow-y-auto rounded-xl border border-[#e4e4e0] bg-white p-4 text-sm text-[#1f2328] shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="font-semibold">Sesi tersimpan</h2>
-        {error && <p className="mt-2 text-red-500">{error}</p>}
-        {loading && <p className="mt-2 text-zinc-500">Memuat…</p>}
-        {!loading && metas.length === 0 && <p className="mt-2 text-zinc-500">Tidak ada sesi tersimpan.</p>}
-        <div className="mt-3 space-y-1">
-          {metas.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => onResume(s.id)}
-              className="block w-full rounded-lg px-2 py-2 text-left hover:bg-[#f7f7f5]"
-            >
-              <span className="block truncate">{s.title}</span>
-              <span className="block text-xs text-zinc-500">
-                {s.model} · {new Date(s.updated).toLocaleString("id-ID")}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── App ──
 
 type UpdateState =
@@ -381,6 +328,7 @@ export default function App() {
 
   // ── Agent runtime ──
   const [folder, setFolder] = useState(loadSavedFolder());
+  const [recentFolders, setRecentFolders] = useState<string[]>(() => loadRecentFolders());
   const [rt, setRt] = useState<AgentRuntime | null>(null);
   const [bootError, setBootError] = useState("");
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -398,8 +346,8 @@ export default function App() {
   const [askReq, setAskReq] = useState<AskUserRequest | null>(null);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [stat, setStat] = useState<StatusInfo | null>(null);
-  const [sessions, setSessions] = useState<{ open: boolean; metas: SessionMeta[]; loading: boolean; error: string }>({
-    open: false,
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sessions, setSessions] = useState<{ metas: SessionMeta[]; loading: boolean; error: string }>({
     metas: [],
     loading: false,
     error: "",
@@ -512,7 +460,13 @@ export default function App() {
         setModeState(info.mode);
         setPermModeState(info.permissionMode);
       }),
-      em.on("done", () => setBusy(false)),
+      em.on("done", () => {
+        setBusy(false);
+        // Judul/waktu sesi berubah tiap turn — segarkan daftar sidebar.
+        void listSessions(rt.cwd)
+          .then((metas) => setSessions({ metas, loading: false, error: "" }))
+          .catch(() => {});
+      }),
       em.on("error", (msg) => {
         setBusy(false);
         setItems((prev) => [...prev, { kind: "notice", text: msg, error: true }]);
@@ -524,6 +478,21 @@ export default function App() {
       unsubsRef.current = [];
     };
   }, [rt]);
+
+  const refreshSessions = useCallback(async () => {
+    if (!rt) return;
+    setSessions((s) => ({ ...s, loading: true }));
+    try {
+      const metas = await listSessions(rt.cwd);
+      setSessions({ metas, loading: false, error: "" });
+    } catch (e) {
+      setSessions({ metas: [], loading: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  }, [rt]);
+
+  useEffect(() => {
+    if (rt) void refreshSessions();
+  }, [rt, refreshSessions]);
 
   // Auto-scroll hanya bila user dekat dasar area pesan.
   const onScroll = useCallback(() => {
@@ -577,16 +546,20 @@ export default function App() {
     setStatus("login");
   }
 
-  async function pickFolder() {
-    const picked = await openDialog({ directory: true, title: "Pilih folder project" });
-    if (typeof picked === "string" && picked) {
-      saveFolder(picked);
-      setRt(null);
-      setItems([]);
-      setTodos([]);
-      setStat(null);
-      setFolder(picked);
+  async function pickFolder(explicit?: string) {
+    let picked = explicit;
+    if (!picked) {
+      const d = await openDialog({ directory: true, title: "Pilih folder project" });
+      if (typeof d === "string" && d) picked = d;
     }
+    if (!picked) return;
+    saveFolder(picked);
+    setRecentFolders(loadRecentFolders());
+    setRt(null);
+    setItems([]);
+    setTodos([]);
+    setStat(null);
+    setFolder(picked);
   }
 
   async function handleModelChange(id: string) {
@@ -612,20 +585,8 @@ export default function App() {
     setItems(hist);
   }
 
-  async function openSessions() {
-    if (!rt) return;
-    setSessions({ open: true, metas: [], loading: true, error: "" });
-    try {
-      const metas = await listSessions(rt.cwd);
-      setSessions({ open: true, metas, loading: false, error: "" });
-    } catch (e) {
-      setSessions({ open: true, metas: [], loading: false, error: e instanceof Error ? e.message : String(e) });
-    }
-  }
-
   async function resumeSession(id: string) {
     if (!rt) return;
-    setSessions((s) => ({ ...s, open: false }));
     try {
       const s = await AgentSession.load(rt.cwd, id);
       if (!s) throw new Error("Sesi gagal dimuat.");
@@ -657,10 +618,12 @@ export default function App() {
         setItems([]);
         setTodos([]);
         setAttached([]);
+        await refreshSessions();
         return true;
       }
       case "/resume":
-        await openSessions();
+        setSidebarCollapsed(false);
+        await refreshSessions();
         return true;
       case "/mode": {
         const valid = [...ALL_MODES, ...customModes.map((c) => c.name)];
@@ -807,12 +770,6 @@ export default function App() {
   }
 
   const modeOptions = useMemo(() => [...ALL_MODES, ...customModes.map((c) => c.name)], [customModes]);
-  const slashMatches = useMemo(() => {
-    if (!input.startsWith("/")) return [];
-    const q = input.toLowerCase();
-    const all = [...COMMANDS, ...customCmds.map((c) => ({ cmd: c.name, desc: c.description }))];
-    return all.filter((c) => c.cmd.trim().toLowerCase().startsWith(q.trim())).slice(0, 6);
-  }, [input, customCmds]);
 
   if (status === "checking") {
     return (
@@ -843,248 +800,150 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-white text-[#1f2328]">
-      {/* Header */}
-      <header className="flex items-center justify-between gap-3 border-b border-[#e4e4e0] bg-[#f7f7f5] px-4 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <button
-            onClick={pickFolder}
-            title="Ganti folder project"
-            className="max-w-40 truncate rounded-md border border-[#e4e4e0] px-2 py-1 text-sm text-[#1f2328] transition hover:bg-white"
-          >
-            {folder ? `📁 ${baseName(folder)}` : "📁 Pilih folder"}
-          </button>
-          <span className="text-sm text-zinc-400">·</span>
-          <span className="truncate text-sm text-zinc-500">{account?.email}</span>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <select
-            value={model}
-            onChange={(e) => handleModelChange(e.target.value)}
-            disabled={busy || !rt}
-            className="max-w-44 rounded-md border border-[#e4e4e0] bg-white px-2 py-1 text-sm text-[#1f2328]"
-          >
-            {models.length === 0 && model && <option value={model}>{model}</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.id}
-              </option>
-            ))}
-          </select>
-          <select
-            value={mode}
-            onChange={(e) => handleModeChange(e.target.value)}
-            disabled={busy || !rt}
-            className="rounded-md border border-[#e4e4e0] bg-white px-2 py-1 text-sm text-[#1f2328]"
-          >
-            {modeOptions.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-          <select
-            value={permMode}
-            onChange={(e) => handlePermChange(e.target.value as PermissionMode)}
-            disabled={busy || !rt}
-            className="rounded-md border border-[#e4e4e0] bg-white px-2 py-1 text-sm text-[#1f2328]"
-          >
-            {PERMISSION_MODES.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-          <span className={`text-sm font-semibold tabular-nums ${balance < 1 ? "text-red-500" : ""}`}>
-            {fmtNum(balance)} <span className="text-xs font-normal text-zinc-500">kredit</span>
-          </span>
-          <details className="relative">
-            <summary className="cursor-pointer list-none rounded-md border border-[#e4e4e0] px-2 py-1 text-sm text-[#1f2328] hover:bg-white">
-              ⋯
-            </summary>
-            <div className="absolute right-0 z-40 mt-1 w-56 overflow-hidden rounded-lg border border-[#e4e4e0] bg-white shadow-lg">
-              <button onClick={openSessions} disabled={!rt} className="block w-full px-3 py-2 text-left text-sm hover:bg-[#f7f7f5] disabled:opacity-50">
-                Sesi…
-              </button>
-              <button onClick={handleCheckUpdate} disabled={updState.phase === "checking"} className="block w-full px-3 py-2 text-left text-sm hover:bg-[#f7f7f5] disabled:opacity-50">
-                Periksa pembaruan{appVersion ? ` (v${appVersion})` : ""}
-              </button>
-              <button onClick={handleLogout} className="block w-full px-3 py-2 text-left text-sm text-red-500 hover:bg-[#f7f7f5]">
-                Keluar
-              </button>
-            </div>
-          </details>
-        </div>
-      </header>
+    <div className="flex h-screen bg-white text-[#1f2328]">
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+        folder={folder}
+        recentFolders={recentFolders}
+        onPickFolder={() => void pickFolder()}
+        onOpenFolder={(p) => void pickFolder(p)}
+        sessions={sessions}
+        activeSessionId={rt?.session.id}
+        onNewSession={() => void execCommand("/new")}
+        onResume={(id) => void resumeSession(id)}
+        email={account?.email}
+        balance={balance}
+        appVersion={appVersion}
+        onCheckUpdate={handleCheckUpdate}
+        checkingUpdate={updState.phase === "checking"}
+        onLogout={() => void handleLogout()}
+      />
 
-      {/* Status bar */}
-      {rt && (
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Status bar */}
         <div className="flex items-center gap-3 border-b border-[#e4e4e0] bg-[#f7f7f5] px-4 py-1 text-xs text-zinc-500">
-          <span className="truncate">{stat?.model || model}</span>
-          {stat?.promptTokens != null && <span>in {fmtNum(stat.promptTokens)}</span>}
-          {stat?.completionTokens != null && <span>out {fmtNum(stat.completionTokens)}</span>}
-          {stat?.creditsUsed != null && <span>{fmtNum(stat.creditsUsed)} kredit terpakai</span>}
-          {stat?.contextPct != null && (
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-16 overflow-hidden rounded bg-zinc-200">
-                <span
-                  className={`block h-full ${stat.contextPct > 85 ? "bg-red-500" : "bg-zinc-400"}`}
-                  style={{ width: `${Math.min(100, stat.contextPct)}%` }}
-                />
-              </span>
-              {Math.round(stat.contextPct)}%
-            </span>
+          <span className="truncate font-medium text-[#1f2328]">{folder ? `📁 ${baseName(folder)}` : "belum ada project"}</span>
+          {rt && (
+            <>
+              <span className="truncate">{stat?.model || model}</span>
+              {stat?.promptTokens != null && <span>in {fmtNum(stat.promptTokens)}</span>}
+              {stat?.completionTokens != null && <span>out {fmtNum(stat.completionTokens)}</span>}
+              {stat?.creditsUsed != null && <span>{fmtNum(stat.creditsUsed)} kredit terpakai</span>}
+              {stat?.contextPct != null && (
+                <span className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-16 overflow-hidden rounded bg-zinc-200">
+                    <span
+                      className={`block h-full ${stat.contextPct > 85 ? "bg-red-500" : "bg-zinc-400"}`}
+                      style={{ width: `${Math.min(100, stat.contextPct)}%` }}
+                    />
+                  </span>
+                  {Math.round(stat.contextPct)}%
+                </span>
+              )}
+            </>
           )}
         </div>
-      )}
 
-      {bootError && (
-        <p className="border-b border-[#e4e4e0] bg-red-50 px-4 py-2 text-sm text-red-600">{bootError}</p>
-      )}
+        {bootError && <p className="border-b border-[#e4e4e0] bg-red-50 px-4 py-2 text-sm text-red-600">{bootError}</p>}
 
-      <div className="flex min-h-0 flex-1">
-        {/* Pesan */}
-        <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto bg-white px-4 py-6">
-          {items.length === 0 && (
-            <p className="mt-16 text-center text-sm text-zinc-500">
-              {folder ? "Mulai percakapan… (/ untuk perintah)" : "Pilih folder project dulu untuk mulai."}
-            </p>
-          )}
-          <div className="mx-auto flex max-w-3xl flex-col gap-4">
-            {items.map((it, i) => {
-              if (it.kind === "notice")
-                return (
+        <div className="flex min-h-0 flex-1">
+          {/* Pesan */}
+          <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto bg-white px-4 py-6">
+            {items.length === 0 && (
+              <p className="mt-16 text-center text-sm text-zinc-500">
+                {folder ? "Mulai percakapan… (/ untuk perintah)" : "Pilih folder project dulu untuk mulai."}
+              </p>
+            )}
+            <div className="mx-auto flex max-w-3xl flex-col gap-4">
+              {items.map((it, i) => {
+                if (it.kind === "notice")
+                  return (
+                    <div
+                      key={i}
+                      className={`self-stretch rounded-lg border px-3 py-2 text-sm ${
+                        it.error ? "border-red-200 bg-red-50 text-red-600" : "border-[#e4e4e0] bg-[#f7f7f5] text-zinc-500"
+                      }`}
+                    >
+                      {it.text}
+                    </div>
+                  );
+                if (it.kind === "tool") return <ToolCard key={i} item={it} />;
+                if (it.kind === "user")
+                  return (
+                    <div key={i} className="self-stretch rounded-lg bg-[#f7f7f5] px-3 py-2.5 text-sm whitespace-pre-wrap">
+                      {it.text}
+                    </div>
+                  );
+                return it.text ? (
                   <div
                     key={i}
-                    className={`self-stretch rounded-lg border px-3 py-2 text-sm ${
-                      it.error ? "border-red-200 bg-red-50 text-red-600" : "border-[#e4e4e0] bg-[#f7f7f5] text-zinc-500"
-                    }`}
+                    className="self-stretch text-sm [&_code]:rounded [&_code]:bg-[#f6f8fa] [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.85em] [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-[#f6f8fa] [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-[#2563eb] [&_a]:underline"
                   >
-                    {it.text}
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{it.text}</ReactMarkdown>
                   </div>
-                );
-              if (it.kind === "tool") return <ToolCard key={i} item={it} />;
-              if (it.kind === "user")
-                return (
-                  <div key={i} className="self-stretch rounded-lg bg-[#f7f7f5] px-3 py-2.5 text-sm whitespace-pre-wrap">
-                    {it.text}
+                ) : busy ? (
+                  <div key={i} className="self-stretch text-sm">
+                    <span className="animate-pulse text-zinc-400">…</span>
                   </div>
-                );
-              return it.text ? (
-                <div
-                  key={i}
-                  className="self-stretch text-sm [&_code]:rounded [&_code]:bg-[#f6f8fa] [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.85em] [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-[#f6f8fa] [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-[#2563eb] [&_a]:underline"
-                >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{it.text}</ReactMarkdown>
-                </div>
-              ) : busy ? (
-                <div key={i} className="self-stretch text-sm">
-                  <span className="animate-pulse text-zinc-400">…</span>
-                </div>
-              ) : null;
-            })}
-          </div>
-        </div>
-
-        {/* Todo panel */}
-        {todos.length > 0 && (
-          <aside className="w-64 shrink-0 overflow-y-auto border-l border-[#e4e4e0] bg-[#f7f7f5] px-3 py-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Todo</h2>
-            <ul className="mt-2 space-y-1.5 text-sm">
-              {todos.map((t, i) => (
-                <li key={i} className="flex items-start gap-2">
-                  <span
-                    className={
-                      t.status === "completed"
-                        ? "text-green-600"
-                        : t.status === "in_progress"
-                          ? "text-yellow-500"
-                          : "text-zinc-400"
-                    }
-                  >
-                    {t.status === "completed" ? "✓" : t.status === "in_progress" ? "◐" : "○"}
-                  </span>
-                  <span className={t.status === "completed" || t.status === "cancelled" ? "text-zinc-400 line-through" : "text-[#1f2328]"}>
-                    {t.content}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </aside>
-        )}
-      </div>
-
-      {/* Input */}
-      <footer className="border-t border-[#e4e4e0] bg-[#f7f7f5] px-4 py-3">
-        {attached.length > 0 && (
-          <div className="mx-auto mb-2 flex max-w-3xl gap-1.5 overflow-x-auto">
-            {attached.map((p) => (
-              <span
-                key={p}
-                className="flex shrink-0 items-center gap-1 rounded-full border border-[#e4e4e0] bg-white px-2 py-0.5 text-xs text-[#1f2328]"
-                title={p}
-              >
-                <span className="max-w-48 truncate font-mono">{baseName(p)}</span>
-                <button
-                  onClick={() => handleDetach(p)}
-                  title={`Lepas ${p}`}
-                  className="text-zinc-400 transition hover:text-red-500"
-                >
-                  ✕
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="relative mx-auto flex max-w-3xl items-end gap-2">
-          {slashMatches.length > 0 && (
-            <div className="absolute bottom-full left-0 mb-1 w-full overflow-hidden rounded-lg border border-[#e4e4e0] bg-white shadow-xl">
-              {slashMatches.map((c) => (
-                <button
-                  key={c.cmd}
-                  onClick={() => setInput(c.cmd)}
-                  className="flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-sm hover:bg-[#f7f7f5]"
-                >
-                  <span className="font-mono text-[#1f2328]">{c.cmd.trim()}</span>
-                  <span className="text-xs text-zinc-500">{c.desc}</span>
-                </button>
-              ))}
+                ) : null;
+              })}
             </div>
-          )}
-          <button
-            onClick={handleAttach}
-            disabled={busy || !rt}
-            title="Lampirkan file"
-            className="rounded-lg border border-[#e4e4e0] bg-white px-3 py-2 text-sm text-[#1f2328] transition hover:bg-[#f7f7f5] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            📎
-          </button>
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            placeholder="Ketik pesan… (Enter kirim, Shift+Enter baris baru, / perintah)"
-            disabled={busy || !rt}
-            className="flex-1 resize-none rounded-lg border border-[#e4e4e0] bg-white px-3 py-2 text-sm text-[#1f2328] placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-[#2563eb] disabled:opacity-50"
-          />
-          {busy ? (
-            <button onClick={handleStop} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-600">
-              Stop
-            </button>
-          ) : (
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || !rt || !folder || balance < 1}
-              className="rounded-lg bg-[#2563eb] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Kirim
-            </button>
+          </div>
+
+          {/* Todo panel */}
+          {todos.length > 0 && (
+            <aside className="w-64 shrink-0 overflow-y-auto border-l border-[#e4e4e0] bg-[#f7f7f5] px-3 py-3">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Todo</h2>
+              <ul className="mt-2 space-y-1.5 text-sm">
+                {todos.map((t, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span
+                      className={
+                        t.status === "completed"
+                          ? "text-green-600"
+                          : t.status === "in_progress"
+                            ? "text-yellow-500"
+                            : "text-zinc-400"
+                      }
+                    >
+                      {t.status === "completed" ? "✓" : t.status === "in_progress" ? "◐" : "○"}
+                    </span>
+                    <span className={t.status === "completed" || t.status === "cancelled" ? "text-zinc-400 line-through" : "text-[#1f2328]"}>
+                      {t.content}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </aside>
           )}
         </div>
-        <p className="mt-1.5 text-center text-xs text-zinc-400">API: {apiOrigin()}</p>
-      </footer>
+
+        <Composer
+          input={input}
+          setInput={setInput}
+          inputRef={inputRef}
+          onSend={() => void handleSend()}
+          onKeyDown={handleKeyDown}
+          busy={busy}
+          ready={!!rt}
+          canSend={!!rt && !!folder && balance >= 1}
+          onStop={handleStop}
+          attached={attached}
+          onAttach={() => void handleAttach()}
+          onDetach={(p) => void handleDetach(p)}
+          models={models}
+          model={model}
+          onModelChange={(id) => void handleModelChange(id)}
+          mode={mode}
+          modeOptions={modeOptions}
+          onModeChange={(m) => void handleModeChange(m)}
+          permMode={permMode}
+          onPermChange={(pm) => void handlePermChange(pm)}
+          customCmds={customCmds}
+          apiOrigin={apiOrigin()}
+        />
+      </div>
 
       {/* Modals */}
       {approval && (
@@ -1107,15 +966,6 @@ export default function App() {
           }}
         />
       )}
-      {sessions.open && (
-        <SessionsModal
-          metas={sessions.metas}
-          loading={sessions.loading}
-          error={sessions.error}
-          onResume={resumeSession}
-          onClose={() => setSessions((s) => ({ ...s, open: false }))}
-        />
-      )}
       {diffText !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={() => setDiffText(null)}>
           <div
@@ -1128,11 +978,7 @@ export default function App() {
         </div>
       )}
       {updState.phase !== "idle" && (
-        <UpdateModal
-          state={updState}
-          onClose={() => setUpdState({ phase: "idle" })}
-          onApply={handleApplyUpdate}
-        />
+        <UpdateModal state={updState} onClose={() => setUpdState({ phase: "idle" })} onApply={handleApplyUpdate} />
       )}
     </div>
   );

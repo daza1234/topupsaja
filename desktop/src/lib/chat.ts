@@ -1,15 +1,16 @@
 import { fetchModels, streamChat, type ChatMessage, type ModelInfo, type StreamResult } from "@topupsaja/core/api.js";
+import { safeGet, safeSet } from "./storage.js";
 
 export type { ChatMessage, ModelInfo };
 
 const MODEL_KEY = "topupsaja.model";
 
 export function loadSavedModel(): string {
-  return localStorage.getItem(MODEL_KEY) ?? "";
+  return safeGet(MODEL_KEY) ?? "";
 }
 
 export function saveModel(id: string): void {
-  localStorage.setItem(MODEL_KEY, id);
+  safeSet(MODEL_KEY, id);
 }
 
 export async function loadModels(): Promise<ModelInfo[]> {

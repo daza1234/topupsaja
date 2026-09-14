@@ -24,18 +24,36 @@ import { AgentSession, lastSessionId } from "@topupsaja/core/session/store.js";
 import { attachPath, detachPath, expandMentions, type AttachResult } from "@topupsaja/core/session/context.js";
 import { discoverCommands, renderCommand, type CustomCommand } from "@topupsaja/core/session/commands.js";
 import { loadSavedModel, saveModel } from "./chat.js";
+import { safeGet, safeSet } from "./storage.js";
 
 export type { AgentRuntime, ModelInfo, AskUserAnswer, AttachResult, CustomCommand };
 export { runTurn, setMode, setPermissionMode, startNewSession, undoLastTurn, diffCheckpoints, discoverCommands, renderCommand };
 
 const FOLDER_KEY = "topupsaja.folder";
+const RECENT_KEY = "topupsaja.recentFolders";
+const RECENT_MAX = 8;
 
 export function loadSavedFolder(): string {
-  return localStorage.getItem(FOLDER_KEY) ?? "";
+  return safeGet(FOLDER_KEY) ?? "";
 }
 
 export function saveFolder(cwd: string): void {
-  localStorage.setItem(FOLDER_KEY, cwd);
+  safeSet(FOLDER_KEY, cwd);
+  safeSet(RECENT_KEY, JSON.stringify(pushRecent(loadRecentFolders(), cwd)));
+}
+
+function pushRecent(list: string[], cwd: string): string[] {
+  return [cwd, ...list.filter((p) => p !== cwd)].slice(0, RECENT_MAX);
+}
+
+export function loadRecentFolders(): string[] {
+  try {
+    const raw = safeGet(RECENT_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter((p): p is string => typeof p === "string").slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface BootstrapResult {
