@@ -37,7 +37,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyQzhDMUNFQkNFOTBGQkEKUldTNkQrbTh6c0hJSWlDc1pEYXhBTnpvNSsxZ3AwSTVockllRnJJZFhhaktOTHRldU9qWkpHN1oK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMxOTc1MTk3NTc0NzkxQzcKUldUSGtVZFhsMUdYd2RULzQ4TSsyZkppNE9DZS92WDQ0MDBROHY3WHlBZjNDb242RFZWNmdqNVcK",
       "endpoints": ["https://github.com/daza1234/topupsaja/releases/latest/download/latest.json"]
     }
   }

@@ -84,8 +84,9 @@ Catatan build/release:
   `node desktop/scripts/gen-latest-json.mjs` setelah build, lalu di-upload
   bersama artefak release.
 - Signing build butuh env `TAURI_SIGNING_PRIVATE_KEY` (**isi file key**,
-  bukan path — variant `_PATH` tidak didukung CLI ini) +
-  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+  bukan path — variant `_PATH` tidak didukung CLI ini). Keypair saat ini
+  dibuat tanpa password, jadi `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` tidak
+  diperlukan.
 
 ### CLI (deprecated)
 
