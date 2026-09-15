@@ -79,9 +79,9 @@ export class ApiError extends Error {
   }
 }
 
-function headers(): Record<string, string> {
+function headers(apiKey: string | undefined): Record<string, string> {
   return {
-    Authorization: `Bearer ${getApiKey() ?? ''}`,
+    Authorization: `Bearer ${apiKey ?? ''}`,
     'Content-Type': 'application/json',
   }
 }
@@ -162,9 +162,11 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions = {}
 }
 
 async function apiGet<T>(path_: string, opts: RetryOptions = {}): Promise<T> {
+  const base = await getBaseUrl()
+  const key = await getApiKey()
   const res = await withRetry(async () => {
-    const r = await fetch(`${getBaseUrl()}${path_}`, {
-      headers: headers(),
+    const r = await fetch(`${base}${path_}`, {
+      headers: headers(key),
       signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
     })
     if (!r.ok) throw await parseError(r)
@@ -199,9 +201,10 @@ export interface VerifyResult {
  * global). Dipakai `/api <key>` dan `tsa login` supaya satu jalur verifikasi.
  */
 export async function verifyKey(key?: string, opts: RetryOptions = {}): Promise<VerifyResult> {
-  const candidate = key ?? getApiKey()
+  const candidate = key ?? (await getApiKey())
+  const base = await getBaseUrl()
   const res = await withRetry(async () => {
-    const r = await fetch(`${getBaseUrl()}/api/v1/auth/verify`, {
+    const r = await fetch(`${base}/api/v1/auth/verify`, {
       headers: {
         Authorization: `Bearer ${candidate ?? ''}`,
         'Content-Type': 'application/json',
@@ -229,10 +232,12 @@ export async function chatCompletion(
   body: Record<string, unknown>,
   opts: { signal?: AbortSignal } = {}
 ): Promise<ChatResult> {
+  const base = await getBaseUrl()
+  const key = await getApiKey()
   const res = await withRetry(async () => {
-    const r = await fetch(`${getBaseUrl()}/v1/chat/completions`, {
+    const r = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST',
-      headers: headers(),
+      headers: headers(key),
       body: JSON.stringify({ ...body, stream: false }),
       signal: opts.signal
         ? AbortSignal.any([AbortSignal.timeout(HTTP_TIMEOUT_MS), opts.signal])
@@ -295,12 +300,14 @@ export async function streamChat(
 ): Promise<StreamResult> {
   let receivedAny = false
   let res: Response
+  const base = await getBaseUrl()
+  const key = await getApiKey()
   try {
     res = await withRetry(
       () =>
-        fetch(`${getBaseUrl()}/v1/chat/completions`, {
+        fetch(`${base}/v1/chat/completions`, {
           method: 'POST',
-          headers: headers(),
+          headers: headers(key),
           body: JSON.stringify({ ...body, stream: true }),
           signal: opts.signal
             ? AbortSignal.any([AbortSignal.timeout(HTTP_TIMEOUT_MS), opts.signal])

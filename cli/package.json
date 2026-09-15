@@ -1,6 +1,6 @@
 {
   "name": "topupsaja-cli",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "CLI coding agent TopUpSaja \u2014 agent terminal TUI dengan prepaid credit (tsa)",
   "type": "module",
   "bin": {

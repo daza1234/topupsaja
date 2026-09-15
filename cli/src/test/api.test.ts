@@ -1,7 +1,7 @@
 import '../bootstrap.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { streamChat, withRetry, isRetryableError, ApiError } from '@topupsaja/core/api.js'
+import { streamChat, withRetry, isRetryableError, ApiError, listModels, verifyKey } from '@topupsaja/core/api.js'
 
 // Env minimal agar config module tidak error.
 process.env.TOPUPSAJA_API_KEY = process.env.TOPUPSAJA_API_KEY ?? 'sk-ts-test'
@@ -119,4 +119,68 @@ test('isRetryableError: 429/5xx/network ya, 4xx tidak', () => {
   assert.equal(isRetryableError(new ApiError(402, 'x')), false)
   assert.equal(isRetryableError(new ApiError(404, 'x')), false)
   assert.equal(isRetryableError(new TypeError('fetch failed')), true)
+})
+
+// ── Anti-regresi: URL/header yang benar-benar diterima fetch (bug 0.9.0:
+// getBaseUrl/getApiKey async tanpa await → "[object Promise]/v1/models") ──
+
+test('listModels: URL http + Authorization Bearer sk- (bukan [object Promise])', async () => {
+  const origFetch = globalThis.fetch
+  let seenUrl = ''
+  let seenAuth = ''
+  globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+    seenUrl = String(url)
+    seenAuth = String((init?.headers as Record<string, string>)?.Authorization ?? '')
+    return new Response(JSON.stringify({ object: 'list', data: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof fetch
+  try {
+    await listModels()
+    assert.ok(seenUrl.startsWith('http://localhost:59999/v1/models'), `URL sampah: ${seenUrl}`)
+    assert.ok(seenAuth.startsWith('Bearer sk-'), `Auth sampah: ${seenAuth}`)
+  } finally {
+    globalThis.fetch = origFetch
+  }
+})
+
+test('streamChat: URL http + Authorization Bearer sk-', async () => {
+  const origFetch = globalThis.fetch
+  let seenUrl = ''
+  let seenAuth = ''
+  globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+    seenUrl = String(url)
+    seenAuth = String((init?.headers as Record<string, string>)?.Authorization ?? '')
+    return sseResponse(sse([{ choices: [{ delta: { content: 'ok' } }] }]))
+  }) as typeof fetch
+  try {
+    const r = await streamChat({ model: 'm', messages: [] })
+    assert.equal(r.content, 'ok')
+    assert.ok(seenUrl.startsWith('http://localhost:59999/v1/chat/completions'), `URL sampah: ${seenUrl}`)
+    assert.ok(seenAuth.startsWith('Bearer sk-'), `Auth sampah: ${seenAuth}`)
+  } finally {
+    globalThis.fetch = origFetch
+  }
+})
+
+test('verifyKey: Bearer dari param key, bukan key global', async () => {
+  const origFetch = globalThis.fetch
+  let seenUrl = ''
+  let seenAuth = ''
+  globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+    seenUrl = String(url)
+    seenAuth = String((init?.headers as Record<string, string>)?.Authorization ?? '')
+    return new Response(JSON.stringify({ ok: true, email: 'a@b.c', api_key_id: 1, balance: 0 }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof fetch
+  try {
+    await verifyKey('sk-ts-kandidat')
+    assert.ok(seenUrl.startsWith('http://localhost:59999/api/v1/auth/verify'), `URL sampah: ${seenUrl}`)
+    assert.equal(seenAuth, 'Bearer sk-ts-kandidat')
+  } finally {
+    globalThis.fetch = origFetch
+  }
 })
