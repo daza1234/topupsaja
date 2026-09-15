@@ -22,7 +22,7 @@ const program = new Command()
 program
   .name(path.basename(process.argv[1] ?? 'topupsaja'))
   .description('CLI coding agent TopUpSaja — terminal agent TUI dengan prepaid credit.')
-  .version('0.8.0')
+  .version('0.9.0')
 
 async function requireKey(): Promise<string> {
   const key = await getApiKey()

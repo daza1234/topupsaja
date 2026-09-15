@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Box, Static, Text, useApp, useInput } from 'ink'
 import type { AgentRuntime } from '@topupsaja/core/agent/runtime.js'
 import { runTurn, setMode, setPermissionMode, startNewSession } from '@topupsaja/core/agent/loop.js'
@@ -15,7 +15,7 @@ import { helpText as baseHelp, SHORT_HELP, settingsText, apiText, applyApiKey, a
 import { undoLastTurn, diffCheckpoints } from '@topupsaja/core/agent/checkpoints.js'
 import { runLocal, formatRunOutput } from '@topupsaja/core/agent/commands-run.js'
 import { collectDiff, generateCommitMessage, performCommit } from '@topupsaja/core/agent/commit.js'
-import { useAgentBridge } from './hooks.js'
+import { useAgentBridge, type Block } from './hooks.js'
 import { BlockView } from './components/MessageList.js'
 import { ChatInput } from './components/ChatInput.js'
 import { ApprovalDialog } from './components/ApprovalDialog.js'
@@ -37,6 +37,8 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
   const [cwd] = useState(rt.cwd)
   const [inject, setInject] = useState<{ text: string; nonce: number } | undefined>(undefined)
   const [confirm, setConfirm] = useState<{ question: string; onAnswer: (yes: boolean) => void } | null>(null)
+  const [queue, setQueue] = useState<string[]>([])
+  const [expandedToolId, setExpandedToolId] = useState<string | null>(null)
   const customCommands = useMemo(() => discoverCommands(rt.cwd), [rt.cwd])
   const customModes = rt.customModes
   const helpText = baseHelp(customCommands)
@@ -52,6 +54,12 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
   )
 
   const overlayActive = bridge.overlay !== null
+  const expandedTool =
+    expandedToolId === null
+      ? undefined
+      : bridge.blocks.find(
+          (b): b is Extract<Block, { kind: 'tool' }> => b.kind === 'tool' && b.id === expandedToolId
+        )
 
   useInput(
     (input, key) => {
@@ -62,12 +70,41 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
     { isActive: !bridge.busy && !bridge.approval && !overlayActive && !confirm }
   )
 
+  // Ctrl+O: toggle output lengkap tool block terakhir (dirender live di bawah transcript).
+  useInput(
+    (input, key) => {
+      if (key.ctrl && input === 'o') {
+        const tools = bridge.blocks.filter((b) => b.kind === 'tool' && b.id)
+        const last = tools[tools.length - 1]
+        if (last && last.kind === 'tool' && last.id) {
+          const id = last.id
+          setExpandedToolId((cur) => (cur === id ? null : id))
+        }
+      }
+    },
+    { isActive: !bridge.approval && !bridge.askUser && !overlayActive && !confirm }
+  )
+
+  // Drain antrean: saat agent selesai (busy false) & tidak ada dialog/overlay, kirim berikutnya.
+  useEffect(() => {
+    if (bridge.busy || queue.length === 0) return
+    if (bridge.approval || bridge.askUser || overlayActive || confirm) return
+    const [next, ...rest] = queue
+    setQueue(rest)
+    void handleSubmit(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridge.busy, queue, bridge.approval, bridge.askUser, overlayActive, confirm])
+
   function quit() {
     void rt.session.save()
     exit()
   }
 
   async function handleSubmit(raw: string) {
+    if (bridge.busy) {
+      setQueue((q) => [...q, raw])
+      return
+    }
     bridge.addUserBlock(raw)
 
     if (raw.startsWith('/')) {
@@ -356,6 +393,13 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
         </Box>
       )}
 
+      {expandedTool && (
+        <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1} marginTop={1}>
+          <BlockView block={expandedTool} expanded />
+          <Text dimColor> ctrl+o tutup</Text>
+        </Box>
+      )}
+
       {bridge.approval && (
         <ApprovalDialog
           req={bridge.approval}
@@ -468,9 +512,10 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
       <TodoPanel items={bridge.todos} />
 
       <ChatInput
-        active={!bridge.busy && !bridge.approval && !bridge.askUser && !overlayActive && !confirm}
+        active={!bridge.approval && !bridge.askUser && !overlayActive && !confirm}
         busy={bridge.busy}
         files={files}
+        queue={queue}
         commands={[
           ...customCommands.map((c) => c.name),
           ...rt.mcp.flatMap((c) => c.prompts.map((p) => `/${mcpPromptName(c.name, p.name)}`)),
@@ -487,7 +532,10 @@ export function App({ rt, files }: { rt: AgentRuntime; files: string[] }) {
         busy={bridge.busy}
         sessionCredits={rt.session.creditsUsed}
       />
-      <Text dimColor> cwd {cwd} · Esc batalkan turn · ctrl+p cari file · ctrl+c keluar</Text>
+      <Text dimColor>
+        {' '}
+        cwd {cwd} · Esc batalkan turn · ctrl+p cari file · ctrl+o expand tool · ctrl+c keluar
+      </Text>
     </Box>
   )
 }

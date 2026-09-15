@@ -5,7 +5,7 @@ import { renderMarkdownPlain } from '../markdown.js'
 
 const MAX_TOOL_OUTPUT = 6
 
-export function BlockView({ block }: { block: Block }) {
+export function BlockView({ block, expanded }: { block: Block; expanded?: boolean }) {
   switch (block.kind) {
     case 'user':
       return (
@@ -32,7 +32,7 @@ export function BlockView({ block }: { block: Block }) {
             <Text color={block.ok === false ? 'red' : 'green'}>
               {'  '}
               {block.ok === false ? '✗ ' : '✓ '}
-              {truncateLines(block.output, MAX_TOOL_OUTPUT)}
+              {expanded ? block.output.slice(0, 4000) : truncateLines(block.output, MAX_TOOL_OUTPUT)}
             </Text>
           )}
         </Box>

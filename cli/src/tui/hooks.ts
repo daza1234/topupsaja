@@ -8,7 +8,7 @@ import type { PermissionMode } from '@topupsaja/core/config.js'
 export type Block =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string }
-  | { kind: 'tool'; name: string; desc: string; ok?: boolean; output?: string }
+  | { kind: 'tool'; id?: string; name: string; desc: string; ok?: boolean; output?: string }
   | { kind: 'notice'; text: string }
   | { kind: 'error'; text: string }
 
@@ -47,7 +47,7 @@ export function useAgentBridge(rt: AgentRuntime) {
       }),
       rt.emitter.on('tool_start', ({ id, name, desc }) => {
         flushStreaming()
-        setBlocks((prev) => [...prev, { kind: 'tool', name, desc }])
+        setBlocks((prev) => [...prev, { kind: 'tool', id, name, desc }])
         toolIdRef.current = id
       }),
       rt.emitter.on('tool_result', ({ id, ok, output }) => {
@@ -60,10 +60,10 @@ export function useAgentBridge(rt: AgentRuntime) {
               copy[copy.length - 1] = { ...last, ok, output }
               return copy
             }
-            return [...prev, { kind: 'tool', name: '?', desc: '', ok, output }]
+            return [...prev, { kind: 'tool', id, name: '?', desc: '', ok, output }]
           })
         } else {
-          setBlocks((prev) => [...prev, { kind: 'tool', name: '?', desc: '', ok, output }])
+          setBlocks((prev) => [...prev, { kind: 'tool', id, name: '?', desc: '', ok, output }])
         }
       }),
       rt.emitter.on('approval_request', (req) => setApproval(req)),

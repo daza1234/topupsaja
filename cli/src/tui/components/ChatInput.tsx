@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Text, Box, useInput } from 'ink'
 import { SLASH_COMMANDS } from '../../usage.js'
+import { applyEditorKey, clearAll, gotoEnd, insertAt, type EditorState } from '../editor.js'
+import { fuzzyFilterFiles } from '../fuzzy.js'
 
 interface Props {
   active: boolean
@@ -10,13 +12,16 @@ interface Props {
   commands?: string[]
   /** Sisipkan teks ke input (mis. @path dari FileFinder Ctrl+P). */
   inject?: { text: string; nonce: number }
+  /** Pesan yang mengantre saat agent busy (dirender di atas input). */
+  queue?: string[]
   onSubmit: (text: string) => void
 }
 
-/** Input chat: Enter kirim, Shift/Alt+Enter baris baru, ↑/↓ riwayat,
- *  Tab lengkapi autocomplete @path & slash-command. */
-export function ChatInput({ active, busy, files, commands, inject, onSubmit }: Props) {
-  const [value, setValue] = useState('')
+/** Input chat dengan editor cursor penuh: Enter kirim, Shift/Alt+Enter baris baru,
+ *  ↑/↓ riwayat, Tab lengkapi autocomplete @path (fuzzy) & slash-command,
+ *  ←/→/Home/End/Ctrl+A-E/B-F/W/K/U editing. Operasi murni ada di editor.ts. */
+export function ChatInput({ active, busy, files, commands, inject, queue, onSubmit }: Props) {
+  const [ed, setEd] = useState<EditorState>({ value: '', cursor: 0 })
   const [history, setHistory] = useState<string[]>([])
   const [histIdx, setHistIdx] = useState(-1)
   const [sugIdx, setSugIdx] = useState(0)
@@ -26,55 +31,43 @@ export function ChatInput({ active, busy, files, commands, inject, onSubmit }: P
   useEffect(() => {
     if (inject && inject.nonce !== lastNonce.current) {
       lastNonce.current = inject.nonce
-      setValue((v) => v + inject.text)
+      setEd((s) => insertAt(s, inject.text))
     }
   }, [inject])
 
-  // ── Autocomplete sederhana ──
-  const lastWord = value.split(/\s/).pop() ?? ''
+  // ── Autocomplete: token di kiri cursor ──
+  const beforeCursor = ed.value.slice(0, ed.cursor)
+  const lastWord = beforeCursor.split(/\s/).pop() ?? ''
   let suggestions: string[] = []
-  let suggestionPrefix = ''
-  if (lastWord.startsWith('@') && lastWord.length >= 1) {
-    suggestionPrefix = lastWord.slice(1)
-    const q = suggestionPrefix.toLowerCase()
-    suggestions = files.filter((f) => f.toLowerCase().includes(q)).slice(0, 8)
-  } else if (value === '/' || (value.startsWith('/') && !value.includes(' ') && value.length >= 1)) {
-    suggestionPrefix = value
-    suggestions = allCommands.filter((c) => c.startsWith(value)).slice(0, 8)
+  if (lastWord.startsWith('@')) {
+    suggestions = fuzzyFilterFiles(files, lastWord.slice(1), 8)
+  } else if (beforeCursor === lastWord && lastWord.startsWith('/')) {
+    suggestions = allCommands.filter((c) => c.startsWith(lastWord)).slice(0, 8)
   }
   const sugActive = suggestions.length > 0
 
   function complete() {
     const pick = suggestions[sugIdx] ?? suggestions[0]
     if (!pick) return
-    if (lastWord.startsWith('@')) {
-      const head = value.slice(0, value.length - lastWord.length)
-      setValue(`${head}@${pick} `)
-    } else {
-      setValue(`${pick} `)
-    }
+    const token = lastWord.startsWith('@') ? `@${pick} ` : `${pick} `
+    const head = ed.value.slice(0, ed.cursor - lastWord.length) + token
+    setEd({ value: head + ed.value.slice(ed.cursor), cursor: head.length })
     setSugIdx(0)
   }
 
   useInput(
     (input, key) => {
-      // Riwayat ↑/↓ saat tidak ada saran.
-      if (key.upArrow && !sugActive) {
-        if (history.length === 0) return
-        const next = histIdx < 0 ? history.length - 1 : Math.max(0, histIdx - 1)
-        setHistIdx(next)
-        setValue(history[next] ?? '')
-        return
-      }
-      if (key.downArrow && !sugActive) {
-        if (histIdx < 0) return
-        const next = histIdx + 1
-        if (next >= history.length) {
-          setHistIdx(-1)
-          setValue('')
-        } else {
+      if (key.upArrow || key.downArrow) {
+        if (sugActive) {
+          setSugIdx((i) => (key.upArrow ? Math.max(0, i - 1) : Math.min(suggestions.length - 1, i + 1)))
+        } else if (key.upArrow && history.length > 0) {
+          const next = histIdx < 0 ? history.length - 1 : Math.max(0, histIdx - 1)
           setHistIdx(next)
-          setValue(history[next] ?? '')
+          setEd(gotoEnd({ value: history[next] ?? '', cursor: 0 }))
+        } else if (key.downArrow && histIdx >= 0) {
+          const next = histIdx + 1
+          setHistIdx(next >= history.length ? -1 : next)
+          setEd(gotoEnd({ value: next >= history.length ? '' : history[next] ?? '', cursor: 0 }))
         }
         return
       }
@@ -84,18 +77,10 @@ export function ChatInput({ active, busy, files, commands, inject, onSubmit }: P
         return
       }
 
-      if (key.upArrow && sugActive) {
-        setSugIdx((i) => Math.max(0, i - 1))
-        return
-      }
-      if (key.downArrow && sugActive) {
-        setSugIdx((i) => Math.min(suggestions.length - 1, i + 1))
-        return
-      }
-
-      // Shift/Alt+Enter → baris baru (termasuk paste multiline dengan meta).
-      if (key.meta) {
-        setValue((v) => v + input.replace(/[\r]/g, '\n').replace(/^\u001b/, ''))
+      const r = applyEditorKey(ed, input, key)
+      if (r.handled) {
+        setEd(r.state)
+        setSugIdx(0)
         return
       }
 
@@ -108,46 +93,40 @@ export function ChatInput({ active, busy, files, commands, inject, onSubmit }: P
         const hasInteriorNewline =
           /[\r\n]/.test(input.slice(0, enterIdx)) || /[\r\n]/.test(input.slice(enterIdx + 1))
         if (hasInteriorNewline) {
-          const cleaned = input.replace(/\r\n?/g, '\n').replace(/\n$/, '')
-          setValue((v) => v + cleaned)
+          setEd(insertAt(ed, input.replace(/\r\n?/g, '\n').replace(/\n$/, '')))
           setSugIdx(0)
           return
         }
-        const before = input.slice(0, enterIdx)
-        const next = value + before
-        const text = next.trim()
+        const full = ed.value.slice(0, ed.cursor) + input.slice(0, enterIdx) + ed.value.slice(ed.cursor)
+        const text = full.trim()
         if (text) {
           setHistory((h) => [...h, text].slice(-50))
           setHistIdx(-1)
-          setValue('')
+          setEd(clearAll())
           onSubmit(text)
         }
-        return
-      }
-
-      if (key.backspace || key.delete) {
-        setValue((v) => v.slice(0, -1))
-        setSugIdx(0)
-        return
-      }
-
-      if (key.ctrl && input === 'u') {
-        setValue('')
-        return
-      }
-
-      if (input && !key.ctrl && !key.upArrow && !key.downArrow) {
-        setValue((v) => v + input)
-        setSugIdx(0)
       }
     },
     { isActive: active }
   )
 
-  const lines = value.split('\n')
+  const { value, cursor } = ed
+  const at = cursor < value.length ? value[cursor] : undefined
+  const pre = at === '\n' ? value.slice(0, cursor + 1) : value.slice(0, cursor)
+  const inv = at === undefined || at === '\n' ? ' ' : at
+  const post = at === undefined ? '' : value.slice(cursor + 1)
 
   return (
     <Box flexDirection="column">
+      {queue && queue.length > 0 && (
+        <Box flexDirection="column" paddingLeft={2}>
+          {queue.map((q, i) => (
+            <Text key={i} dimColor>
+              ⏳ [{i + 1}] {q}
+            </Text>
+          ))}
+        </Box>
+      )}
       {sugActive && (
         <Box flexDirection="column" paddingLeft={2}>
           {suggestions.map((s, i) => (
@@ -163,15 +142,26 @@ export function ChatInput({ active, busy, files, commands, inject, onSubmit }: P
         borderStyle="round"
         borderColor={busy ? 'gray' : 'cyan'}
         paddingX={1}
-        marginTop={sugActive ? 0 : 1}
+        marginTop={sugActive || (queue && queue.length > 0) ? 0 : 1}
       >
         <Text color="cyan" bold>
           {busy ? '  … ' : '> '}
         </Text>
         {value === '' ? (
-          <Text dimColor>{busy ? 'agent sedang bekerja — Esc untuk batalkan' : 'ketik pesan, / untuk perintah, @ untuk sisip file'}</Text>
+          <Text>
+            {active ? <Text inverse> </Text> : ''}
+            <Text dimColor>
+              {busy
+                ? 'agent sedang bekerja — Enter untuk antre, Esc batalkan turn'
+                : 'ketik pesan, / untuk perintah, @ untuk sisip file'}
+            </Text>
+          </Text>
         ) : (
-          <Text>{lines.join('\n')}</Text>
+          <Text>
+            {pre}
+            <Text inverse>{inv}</Text>
+            {post}
+          </Text>
         )}
       </Box>
     </Box>
