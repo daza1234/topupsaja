@@ -15,7 +15,7 @@ Audit: 2026-09-12 · Cakupan: server API (Fastify), web dashboard (Next.js), CLI
 | MED | Webhook tanpa rate limit khusus | ✅ FIXED — 60/min/IP per path webhook |
 | MED | `/api/topup/status/:id` otorisasi pemilik | ✅ SUDAH AMAN sejak awal (query scoped `user_id`) |
 | MED | CLI: `cat .env` / `~/.topupsaja/config.json` auto-allow (SAFE_FIRST) → output API key masuk konteks model | ✅ FIXED — gate secret-path di permission layer (`cli/src/agent/secrets.ts`), selalu `ask` bahkan di mode yolo, deny rule tetap lebih kuat |
-| LOW | Register memberi 2.000.000 credit gratis tanpa email verifikasi | 📝 Roadmap (keputusan bisnis) |
+| LOW | Register memberi 2.000.000 credit gratis tanpa email verifikasi | ✅ Mitigasi 2026-09-16 — `settings.free_signup_credits = 0` (baca runtime per-register, reversibel utk promo) |
 | LOW | JWT 30d tanpa revocation list; bcrypt cost 10; session log CLI plaintext | 📝 Roadmap |
 | LOW | `verifyApiKey` lookup by prefix 8-char `limit 20` — collision prefix disaring bcrypt, tapi lookup massal tiap request bisa dioptimalkan | 📝 Roadmap |
 | LOW | CSP masih Report-Only | ✅ Enforced 2026-09-13 (rollback: `/etc/caddy/Caddyfile.bak-20260912-sec`) |
