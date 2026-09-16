@@ -61,6 +61,22 @@ export default async function userRoutes(app) {
     return { days, totals, by_model: summary }
   })
 
+  /** GET /api/me/usage/logs?limit=50 — log per-request terbaru */
+  app.get('/api/me/usage/logs', { preHandler: [app.authenticateSession] }, async (request) => {
+    const limit = Math.min(Math.max(parseInt(request.query.limit ?? '50', 10) || 50, 1), 200)
+    return query(
+      `select l.created_at, l.alias, k.label as key_label,
+              l.prompt_tokens, l.cached_tokens, l.completion_tokens,
+              l.credits_used, l.cost_usd, l.status_code, l.error_message
+       from usage_logs l
+       left join api_keys k on k.id = l.api_key_id
+       where l.user_id = $1
+       order by l.created_at desc
+       limit $2`,
+      [request.userRow.id, limit]
+    )
+  })
+
   /** GET /api/me/topups */
   app.get('/api/me/topups', { preHandler: [app.authenticateSession] }, async (request) => {
     return query(

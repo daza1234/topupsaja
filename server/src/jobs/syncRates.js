@@ -37,8 +37,10 @@ export const DEFAULT_ACTIVE_MODELS = new Set([
 ])
 
 // Kurasi manual label use-case per exact or_model_id (roster DEFAULT_ACTIVE_MODELS).
-// ponytail: heuristik kata kunci kasar bisa salah label model niche — kalau
-// salah arah, tambah override di sini, jangan perumit regex.
+// Override adalah kata akhir setelah sinyal terstruktur + regex: (a) kurasi
+// roster, (b) menutup model yang sinyal/regex-nya meleset. ponytail: heuristik
+// kata kunci kasar bisa salah label model niche — kalau salah arah, tambah
+// override di sini, jangan perumit regex.
 const TAG_OVERRIDES = {
   'deepseek/deepseek-chat': ['coding', 'analisis'],
   'deepseek/deepseek-r1': ['coding', 'reasoning'],
@@ -58,13 +60,38 @@ const TAG_OVERRIDES = {
   'x-ai/grok-4.5': ['coding', 'analisis', 'reasoning'],
   'moonshotai/kimi-k2': ['coding', 'analisis'],
   'z-ai/glm-4.6': ['coding', 'reasoning'],
+  'z-ai/glm-flash-latest': ['coding', 'reasoning'],
 }
 
+// ponytail: stub non-redirect lain (deskripsi generik tanpa kata kunci)
+// tetap fallback ke ['ringkasan'] — tambah override di TAG_OVERRIDES bila ketemu.
+const REDIRECT_STUB = /redirects? to the (latest|newest) model/
+
 // Heuristik label dari nama + deskripsi katalog (lowercase includes).
-function tagModel(m, inputModalities) {
-  const hay = `${m.name ?? ''} ${m.description ?? ''}`.toLowerCase()
+// Deskripsi stub redirect ("always redirects to the latest model...") tak
+// berguna — resolve ke deskripsi model target alias dari katalog yang sama.
+function tagModel(m, inputModalities, byId = new Map()) {
+  let hay = `${m.name ?? ''} ${m.description ?? ''}`.toLowerCase()
+  if (REDIRECT_STUB.test(hay)) {
+    const target = byId.get(m.alias_target?.slug ?? m.canonical_slug?.replace(/-\d{8}$/, ''))
+    if (target) hay += ` ${target.description ?? ''}`.toLowerCase()
+  }
   const tags = new Set(TAG_OVERRIDES[m.id] ?? [])
-  if (/code|programming|software|developer/.test(hay)) tags.add('coding')
+  // Sinyal terstruktur OpenRouter (add-only, tidak menimpa override/regex).
+  const params = m.supported_parameters ?? []
+  if (
+    params.includes('reasoning') ||
+    params.includes('reasoning_effort') ||
+    params.includes('include_reasoning')
+  ) tags.add('reasoning')
+  // ponytail: presence `artificial_analysis.coding` = kemampuan terukur,
+  // threshold sengaja tak dipakai — kalau terlalu longgar, tambah batas di sini.
+  if (m.benchmarks?.artificial_analysis?.coding_index != null) tags.add('coding')
+  const arenaCode = (m.benchmarks?.design_arena ?? []).find(
+    (b) => /code|web/.test(b.category ?? '') && (b.rank ?? Infinity) <= 10
+  )
+  if (arenaCode) tags.add('coding')
+  if (/cod(e|ing)|programming|software|developer/.test(hay)) tags.add('coding')
   if (/financ|analy|data|business|report/.test(hay)) tags.add('analisis')
   if (/reason|logic|math|chain-of-thought|thinking/.test(hay)) tags.add('reasoning')
   if (/translat|multilingual|bahasa/.test(hay)) tags.add('terjemahan')
@@ -107,6 +134,7 @@ export async function syncRates() {
 
   const kurs = await getKurs()
   const aliases = buildAliases(models.map((m) => m.id))
+  const byId = new Map(models.map((m) => [m.id, m]))
   let synced = 0
 
   for (const m of models) {
@@ -125,7 +153,7 @@ export async function syncRates() {
     const supportsVision = Array.isArray(inputModalities)
       ? inputModalities.includes('image')
       : false
-    const tags = tagModel(m, Array.isArray(inputModalities) ? inputModalities : ['text'])
+    const tags = tagModel(m, Array.isArray(inputModalities) ? inputModalities : ['text'], byId)
 
     await query(
       `insert into model_pricing
@@ -162,6 +190,15 @@ export async function syncRates() {
     )
     synced += 1
   }
+
+  // Nonaktifkan model yang sudah hilang dari katalog OpenRouter (is_active
+  // basi: tak pernah di-upsert lagi, harga/tag jadi usang). Model yang masih
+  // ada di katalog tapi nonaktif tak disentuh — aktivasi tetap urusan admin.
+  await query(
+    `update model_pricing set is_active = false
+      where is_active and not (or_model_id = any($1))`,
+    [models.map((m) => m.id)]
+  )
 
   // Margin guard: rate jual efektif termurah vs cost serve (worst case = fee premium).
   const floorRate = await queryOne(
