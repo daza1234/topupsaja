@@ -212,6 +212,63 @@ async function exchangeGoogleCode(code, redirectUri, codeVerifier) {
 }
 
 export default async function authRoutes(app) {
+  /** POST /api/auth/register */
+  app.post('/api/auth/register', {
+    config: { rateLimit: { max: 10, timeWindow: '1 hour' } },
+  }, async (request, reply) => {
+    const { email, password, consent } = request.body ?? {}
+    if (!email || !password || password.length < 8) {
+      return reply.code(400).send({
+        error: 'Email wajib diisi & password minimal 8 karakter',
+      })
+    }
+    if (consent !== true) {
+      return reply.code(400).send({
+        error: 'Anda harus menyetujui Syarat & Ketentuan dan Kebijakan Privasi',
+      })
+    }
+    const emailNorm = String(email).trim().toLowerCase()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailNorm)) {
+      return reply.code(400).send({ error: 'Email tidak valid' })
+    }
+
+    const exists = await queryOne('select id from users where email = $1', [emailNorm])
+    if (exists) {
+      return reply.code(409).send({ error: 'Email sudah terdaftar' })
+    }
+
+    const hash = await bcrypt.hash(password, 10)
+    const role = config.adminEmails.includes(emailNorm) ? 'admin' : 'user'
+
+    const user = await queryOne(
+      `insert into users (email, password_hash, role, consent_accepted_at)
+       values ($1, $2, $3, now())
+       returning id, email, role, balance_credits`,
+      [emailNorm, hash, role]
+    )
+
+    // Bonus pendaftaran kecil (dari settings)
+    const free = await queryOne(
+      "select value from settings where key = 'free_signup_credits'"
+    )
+    const freeCredits = Number(free?.value ?? 0)
+    if (freeCredits > 0) {
+      await addCredits(user.id, freeCredits)
+    }
+
+    const fresh = await queryOne(
+      'select id, email, role, balance_credits from users where id = $1',
+      [user.id]
+    )
+    const token = await createSession(user.id, request)
+    setSessionCookie(reply, token)
+    // Kirim email verifikasi di luar response-critical path; register tetap sukses.
+    await createEmailVerificationToken(user.id, emailNorm)
+    return reply.code(201).send({
+      user: { ...fresh, balance_credits: Number(fresh.balance_credits) },
+    })
+  })
+
   /** GET /api/auth/verify?token= — link dari email → verifikasi → redirect dashboard */
   app.get('/api/auth/verify', {
     config: { rateLimit: { max: 30, timeWindow: '1 hour' } },
